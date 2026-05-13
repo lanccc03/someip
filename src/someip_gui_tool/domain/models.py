@@ -97,11 +97,21 @@ class DeploymentConfig:
     offer_ttl_s: float
     find_ttl_s: float
 
-    def local_ip_for(self, role: Role) -> str:
-        return self.server_ip if role is Role.SERVER else self.client_ip
+    def local_ip_for(self, role: Role | str) -> str:
+        try:
+            normalized = Role(role)
+        except ValueError as exc:
+            raise ValueError(f"Unsupported role: {role!r}") from exc
 
-    def remote_ip_for(self, role: Role) -> str:
-        return self.client_ip if role is Role.SERVER else self.server_ip
+        return self.server_ip if normalized is Role.SERVER else self.client_ip
+
+    def remote_ip_for(self, role: Role | str) -> str:
+        try:
+            normalized = Role(role)
+        except ValueError as exc:
+            raise ValueError(f"Unsupported role: {role!r}") from exc
+
+        return self.client_ip if normalized is Role.SERVER else self.server_ip
 
 
 @dataclass(frozen=True)

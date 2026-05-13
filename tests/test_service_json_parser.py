@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pytest
 
 from someip_gui_tool.domain.enums import Role, TransportProtocol
@@ -89,3 +91,36 @@ def test_service_registry_loads_and_queries(adc40_soc_dir):
 
     assert service.service_name == "IntelliDriveRmdSrv"
     assert registry.find_element(0x080C, 0x9001).name == "VertHeiRmdSts"
+
+
+def test_service_registry_rejects_duplicate_service_id(adc40_soc_dir):
+    service = load_service_definition(adc40_soc_dir / "0x080C.json")
+
+    with pytest.raises(ValueError, match="Duplicate service id 0x080C"):
+        ServiceRegistry([service, replace(service)])
+
+
+def test_service_registry_rejects_duplicate_element_id(adc40_soc_dir):
+    service = load_service_definition(adc40_soc_dir / "0x080C.json")
+    field = service.fields[0]
+    duplicate_getter = replace(field.getter, element_id=0x9001)
+    duplicate_field = replace(field, getter=duplicate_getter)
+    duplicate_service = replace(service, fields=[duplicate_field])
+    registry = ServiceRegistry([duplicate_service])
+
+    with pytest.raises(
+        ValueError,
+        match="Duplicate element id 0x9001 in service 0x080C",
+    ):
+        registry.find_element(0x080C, 0x9001)
+
+
+def test_service_registry_missing_element_error_uses_hex_ids(adc40_soc_dir):
+    registry = ServiceRegistry.load_directory(adc40_soc_dir)
+
+    with pytest.raises(KeyError) as exc_info:
+        registry.find_element(0x080C, 0x9999)
+
+    message = str(exc_info.value)
+    assert "0x9999" in message
+    assert "0x080C" in message

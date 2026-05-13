@@ -6,6 +6,7 @@ from someip_gui_tool.parsing.service_json import (
     load_service_definition,
     load_service_directory,
 )
+from someip_gui_tool.core.service_registry import ServiceRegistry
 
 
 def build_deployment_config() -> DeploymentConfig:
@@ -79,3 +80,12 @@ def test_load_service_directory_includes_all_json(adc40_soc_dir):
     ids = {service.service_id for service in services}
 
     assert {0x080A, 0x080C, 0x080D, 0x080E, 0x0F01}.issubset(ids)
+
+
+def test_service_registry_loads_and_queries(adc40_soc_dir):
+    registry = ServiceRegistry.load_directory(adc40_soc_dir)
+
+    service = registry.get_service(0x080C)
+
+    assert service.service_name == "IntelliDriveRmdSrv"
+    assert registry.find_element(0x080C, 0x9001).name == "VertHeiRmdSts"

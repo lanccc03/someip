@@ -2,6 +2,10 @@ import pytest
 
 from someip_gui_tool.domain.enums import Role, TransportProtocol
 from someip_gui_tool.domain.models import DeploymentConfig, ServiceDefinition
+from someip_gui_tool.parsing.service_json import (
+    load_service_definition,
+    load_service_directory,
+)
 
 
 def build_deployment_config() -> DeploymentConfig:
@@ -55,3 +59,23 @@ def test_deployment_config_rejects_invalid_role():
 
     with pytest.raises(ValueError, match="Unsupported role: 'Invalid'"):
         deployment.remote_ip_for("Invalid")
+
+
+def test_load_second_start_service(adc40_soc_dir):
+    service = load_service_definition(adc40_soc_dir / "0x080D.json")
+
+    assert service.service_id == 0x080D
+    assert service.service_name == "SecondStartSrv"
+    assert service.deployment.instance_id == 0x0001
+    assert service.deployment.default_transport.value == "UDP"
+    assert [event.name for event in service.events] == ["SecondStartPopup"]
+    assert [method.name for method in service.methods] == ["SecondStartCtrl"]
+    assert service.methods[0].method_id == 0x0001
+    assert service.events[0].eventgroup_id == 0x0001
+
+
+def test_load_service_directory_includes_all_json(adc40_soc_dir):
+    services = load_service_directory(adc40_soc_dir)
+    ids = {service.service_id for service in services}
+
+    assert {0x080A, 0x080C, 0x080D, 0x080E, 0x0F01}.issubset(ids)

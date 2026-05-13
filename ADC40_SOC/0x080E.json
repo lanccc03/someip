@@ -1,0 +1,105 @@
+￼
+
+{
+  "ServiceInterfaceID": "0x080E",
+  "ServiceInterfaceName": "ADASRouteSrv",
+  "Deployment": {
+    "ServiceInterfaceName": "ADASRouteSrv",
+    "ServiceInterfaceID": "0x080E",
+    "Service Interface Instance ID": "0x0001",
+    "Major Version": 1,
+    "Minor Version": 0,
+    "VLAN ID": 3,
+    "VLAN Priority": 3,
+    "Transport Protocol": "UDP",
+    "Server ECU": "ADC40_SOC",
+    "Server IP Address": "172.16.3.14/24",
+    "Server MAC Address": "02:47:57:4D:00:14",
+    "Server Port": "/",
+    "Client ECU": "ILD_R",
+    "Client IP Address": "172.16.3.59/24",
+    "Client MAC Address": "02:47:57:4D:00:59",
+    "Client Port": "/",
+    "Multicast IP Address": "239.192.255.251",
+    "Multicast MAC Address": "01:00:5E:40:FF:FB",
+    "InitialDelayMin\n(s)": 0,
+    "InitialDelayMax\n(s)": 0.1,
+    "InitialRepetitionBaseDelay\n(s)": 0.03,
+    "InitialRepetitionMax": 3,
+    "OfferCyclicDelay\n(s)": 1,
+    "RequestResponseMin\n(s)": 0,
+    "RequestResponseMax\n(s)": 0.5,
+    "TTL for Offer(s)": 3,
+    "TTL for Find\n(s)": 3
+  },
+  "ServiceInterfaces": [
+    {
+      "ElementName": "VehicleInfo",
+      "ElementID": "0x8001",
+      "ElementVersion": 0.1,
+      "ElementDescription": "车身信息",
+      "TransmissionType": "Event",
+      "FieldType": null,
+      "RR/FF": null,
+      "L4-Protocol": "UDP",
+      "EventgroupName": "egVehicleInfo",
+      "EventgroupID": "0x0001",
+      "SendStrategy": "Cycle",
+      "CycleTime": 1,
+      "E2EProfile": null,
+      "E2EOffset": null,
+      "E2EDataID": null,
+      "Parameters": [
+        {
+          "Position": null,
+          "ParameterName": "VehicleInfo",
+          "ParameterDescription": null,
+          "IN/OUT": null,
+          "DatatypeReferenceName": "VehicleInfo_Struct",
+          "DatatypeReference": {
+            "DatatypeName": "VehicleInfo_Struct",
+            "DatatypeVersion": 0.1,
+            "DatatypeDescription": null,
+            "Datatype": "Struct",
+            "Members": [
+              {
+                "Position": 0,
+                "MemberName": "VehicleSpeed",
+                "MemberDescription": null,
+                "DatatypeReference": {
+                  "DatatypeName": "VehicleSpeed_Float",
+                  "DatatypeVersion": 0.1,
+                  "DatatypeDescription": null,
+                  "Datatype": "Float",
+                  "MinValue": 0,
+                  "MaxValue": 299.98125,
+                  "TypedefReference": {
+                    "DatatypeName": "float32",
+                    "Datatype": "BasicType"
+                  }
+                }
+              },
+              {
+                "Position": 1,
+                "MemberName": "Odometer",
+                "MemberDescription": null,
+                "DatatypeReference": {
+                  "DatatypeName": "Odometer_Float",
+                  "DatatypeVersion": 0.1,
+                  "DatatypeDescription": null,
+                  "Datatype": "Float",
+                  "MinValue": 0,
+                  "MaxValue": 999999.9,
+                  "TypedefReference": {
+                    "DatatypeName": "float32",
+                    "Datatype": "BasicType"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

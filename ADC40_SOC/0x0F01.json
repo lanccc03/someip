@@ -1,0 +1,277 @@
+{
+  "ServiceInterfaceID": "0x0F01",
+  "ServiceInterfaceName": "HUTSystemFunctions",
+  "Deployment": {
+    "ServiceInterfaceName": "HUTSystemFunctions",
+    "ServiceInterfaceID": "0x0F01",
+    "Service Interface Instance ID": "0x0001",
+    "Major Version": 1,
+    "Minor Version": 0,
+    "VLAN ID": 3,
+    "VLAN Priority": 3,
+    "Transport Protocol": "TCP",
+    "Server ECU": "HUT_SOC_Android",
+    "Server IP Address": "172.16.3.99/24",
+    "Server MAC Address": "02:47:57:4D:00:99",
+    "Server Port": "/",
+    "Client ECU": "ADC40_SOC",
+    "Client IP Address": "172.16.3.14/24",
+    "Client MAC Address": "02:47:57:4D:00:14",
+    "Client Port": "/",
+    "Multicast IP Address": "239.192.255.251",
+    "Multicast MAC Address": "01:00:5E:40:FF:FB",
+    "InitialDelayMin\n(s)": 0,
+    "InitialDelayMax\n(s)": 0.1,
+    "InitialRepetitionBaseDelay\n(s)": 0.03,
+    "InitialRepetitionMax": 3,
+    "OfferCyclicDelay\n(s)": 1,
+    "RequestResponseMin\n(s)": 0,
+    "RequestResponseMax\n(s)": 0.5,
+    "TTL for Offer(s)": 3,
+    "TTL for Find\n(s)": 3
+  },
+  "ServiceInterfaces": [
+    {
+      "ElementName": "AmapInfo",
+      "ElementID": "0x8001",
+      "ElementVersion": 0.1,
+      "ElementDescription": null,
+      "TransmissionType": "Event",
+      "FieldType": null,
+      "RR/FF": "FF",
+      "L4-Protocol": "TCP",
+      "EventgroupName": "NavInfoData",
+      "EventgroupID": "0x0001",
+      "SendStrategy": "Trigger",
+      "CycleTime": null,
+      "E2EProfile": null,
+      "E2EOffset": null,
+      "E2EDataID": null,
+      "Parameters": [
+        {
+          "Position": 0,
+          "ParameterName": "AmapInfo",
+          "ParameterDescription": null,
+          "IN/OUT": "OUT",
+          "DatatypeReferenceName": "AmapInfo",
+          "DatatypeReference": {
+            "DatatypeName": "AmapInfo",
+            "DatatypeVersion": 0.1,
+            "DatatypeDescription": "红绿灯、路口车道、箭头、施工、服务区等路况信息",
+            "Datatype": "Typedef",
+            "TypedefReference": {
+              "DatatypeName": "uint8",
+              "Datatype": "BasicType"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "ElementName": "HAVPMapManagementSet",
+      "ElementID": "0x8002",
+      "ElementVersion": 0.1,
+      "ElementDescription": "记忆泊车地图管理设置，记忆泊车地图中的路径信息以及路径上的车位信息发生变化时发送",
+      "TransmissionType": "Event",
+      "FieldType": null,
+      "RR/FF": "FF",
+      "L4-Protocol": "TCP",
+      "EventgroupName": "egHAVPMapManagementSet",
+      "EventgroupID": "0x0002",
+      "SendStrategy": "Trigger",
+      "CycleTime": null,
+      "E2EProfile": null,
+      "E2EOffset": null,
+      "E2EDataID": null,
+      "Parameters": [
+        {
+          "Position": 0,
+          "ParameterName": "HAVPMapManagement",
+          "ParameterDescription": null,
+          "IN/OUT": "OUT",
+          "DatatypeReferenceName": "HAVPMapManagement_Array",
+          "DatatypeReference": {
+            "DatatypeName": "HAVPMapManagement_Array",
+            "DatatypeVersion": 0.1,
+            "DatatypeDescription": null,
+            "Datatype": "Array",
+            "ArrayInfo": {
+              "ArrayMin": 0,
+              "ArrayMax": 5120
+            },
+            "ElementType": {
+              "DatatypeName": "uint8",
+              "Datatype": "BasicType"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "ElementName": "SlotIDReport",
+      "ElementID": "0x8003",
+      "ElementVersion": 0.1,
+      "ElementDescription": "用户可以选择HUT主界面是正常界面或者领航桌面的功能，在HAVP的地图界面、或领航桌面的行车还原世界、或AVM的行/泊车还原世界中，车速小于20km/h后，ADC会发出识别到的车位（无车位数字标识）到行车还原世界，此时用户可以点选界面上显示的车位，HUT识别用户点击的车位，并将车位ID号通过该信号，发送给ADC，ADC收到车位ID后，规划泊入车位的路径。",
+      "TransmissionType": "Event",
+      "FieldType": null,
+      "RR/FF": "FF",
+      "L4-Protocol": "TCP",
+      "EventgroupName": "egSlotIDReport",
+      "EventgroupID": "0x0003",
+      "SendStrategy": "Trigger",
+      "CycleTime": null,
+      "E2EProfile": null,
+      "E2EOffset": null,
+      "E2EDataID": null,
+      "Parameters": [
+        {
+          "Position": 0,
+          "ParameterName": "SlotID",
+          "ParameterDescription": "车位ID",
+          "IN/OUT": "OUT",
+          "DatatypeReferenceName": "SlotID_String",
+          "DatatypeReference": {
+            "DatatypeName": "SlotID_String",
+            "DatatypeVersion": 0.1,
+            "DatatypeDescription": "车位ID",
+            "Datatype": "String",
+            "TypedefReference": {
+              "DatatypeName": "utf8",
+              "Datatype": "BasicType"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "ElementName": "AudioRecPopupReq",
+      "ElementID": "0x0001",
+      "ElementVersion": 0.1,
+      "ElementDescription": "通过长按方控时距减的按键：1.智驾回传当下时间点的数据；2.智驾请求主机进行弹窗，辅助用户进行录音及时间戳上传后台TSP",
+      "TransmissionType": "Method",
+      "FieldType": null,
+      "RR/FF": "FF",
+      "L4-Protocol": "TCP",
+      "EventgroupName": null,
+      "EventgroupID": null,
+      "SendStrategy": null,
+      "CycleTime": null,
+      "E2EProfile": null,
+      "E2EOffset": null,
+      "E2EDataID": null,
+      "Parameters": [
+        {
+          "Position": 0,
+          "ParameterName": "AudioRecPopup",
+          "ParameterDescription": null,
+          "IN/OUT": "IN",
+          "DatatypeReferenceName": "AudioRecPopup_Integer",
+          "DatatypeReference": {
+            "DatatypeName": "AudioRecPopup_Integer",
+            "DatatypeVersion": 0.1,
+            "DatatypeDescription": "请求弹窗",
+            "Datatype": "Integer",
+            "MinValue": null,
+            "MaxValue": null,
+            "TypedefReference": {
+              "DatatypeName": "uint64",
+              "Datatype": "BasicType"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "ElementName": "NavCorrn",
+      "ElementID": "0x0002",
+      "ElementVersion": 0.1,
+      "ElementDescription": "导航路线纠正",
+      "TransmissionType": "Method",
+      "FieldType": null,
+      "RR/FF": "FF",
+      "L4-Protocol": "TCP",
+      "EventgroupName": null,
+      "EventgroupID": null,
+      "SendStrategy": null,
+      "CycleTime": null,
+      "E2EProfile": null,
+      "E2EOffset": null,
+      "E2EDataID": null,
+      "Parameters": [
+        {
+          "Position": 0,
+          "ParameterName": "NavCorrnReq",
+          "ParameterDescription": null,
+          "IN/OUT": "IN",
+          "DatatypeReferenceName": "NavCorrnReq_Enum",
+          "DatatypeReference": {
+            "DatatypeName": "NavCorrnReq_Enum",
+            "DatatypeVersion": 0.1,
+            "DatatypeDescription": null,
+            "Datatype": "Enum",
+            "Values": [
+              {
+                "Value": 0,
+                "Description": "Switch_main_auxiliary"
+              },
+              {
+                "Value": 1,
+                "Description": "Switch_on_and_off_bridge"
+              },
+              {
+                "Value": 2,
+                "Description": "Cancel_poi"
+              }
+            ],
+            "TypedefReference": {
+              "DatatypeName": "uint8",
+              "Datatype": "BasicType"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "ElementName": "UsrCreatMark",
+      "ElementID": "0x8004",
+      "ElementVersion": 0.1,
+      "ElementDescription": "用户点击“用户共创”按钮或用户唤起语音助手“小魏同学”，反馈智驾问题",
+      "TransmissionType": "Event",
+      "FieldType": null,
+      "RR/FF": null,
+      "L4-Protocol": "TCP",
+      "EventgroupName": "egUsrCreatMark",
+      "EventgroupID": "0x0004",
+      "SendStrategy": "Trigger",
+      "CycleTime": null,
+      "E2EProfile": null,
+      "E2EOffset": null,
+      "E2EDataID": null,
+      "Parameters": [
+        {
+          "Position": null,
+          "ParameterName": "UsrCreatMark",
+          "ParameterDescription": null,
+          "IN/OUT": null,
+          "DatatypeReferenceName": "UsrCreatMark_Enum",
+          "DatatypeReference": {
+            "DatatypeName": "UsrCreatMark_Enum",
+            "DatatypeVersion": 0.1,
+            "DatatypeDescription": null,
+            "Datatype": "Enum",
+            "Values": [
+              {
+                "Value": 0,
+                "Description": "MarkingReq"
+              }
+            ],
+            "TypedefReference": {
+              "DatatypeName": "uint8",
+              "Datatype": "BasicType"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

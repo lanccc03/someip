@@ -1,0 +1,83 @@
+{
+  "ServiceInterfaceID": "0x080A",
+  "ServiceInterfaceName": "CockpitIntellgntDecouplingSrv",
+  "Deployment": {
+    "ServiceInterfaceName": "CockpitIntellgntDecouplingSrv",
+    "ServiceInterfaceID": "0x080A",
+    "Service Interface Instance ID": "0x0001",
+    "Major Version": 1,
+    "Minor Version": 0,
+    "VLAN ID": 3,
+    "VLAN Priority": 3,
+    "Transport Protocol": "TCP",
+    "Server ECU": "ADC40_SOC",
+    "Server IP Address": "172.16.3.14/24",
+    "Server MAC Address": "02:47:57:4D:00:14",
+    "Server Port": "/",
+    "Client ECU": "HUT_SOC_Android",
+    "Client IP Address": "172.16.3.99/24",
+    "Client MAC Address": "02:47:57:4D:00:99",
+    "Client Port": "/",
+    "Multicast IP Address": "239.192.255.251",
+    "Multicast MAC Address": "01:00:5E:40:FF:FB",
+    "InitialDelayMin\n(s)": 0,
+    "InitialDelayMax\n(s)": 0.1,
+    "InitialRepetitionBaseDelay\n(s)": 0.03,
+    "InitialRepetitionMax": 3,
+    "OfferCyclicDelay\n(s)": 1,
+    "RequestResponseMin\n(s)": 0,
+    "RequestResponseMax\n(s)": 0.5,
+    "TTL for Offer(s)": 3,
+    "TTL for Find\n(s)": 3
+  },
+  "ServiceInterfaces": [
+    {
+      "ElementName": "IntellgntSwtDecoupSts",
+      "ElementID": "0x8001",
+      "ElementVersion": 0.1,
+      "ElementDescription": "智驾解耦开关状态",
+      "TransmissionType": "Event",
+      "FieldType": null,
+      "RR/FF": null,
+      "L4-Protocol": "TCP",
+      "EventgroupName": "egIntellgntSwtDecoupSts",
+      "EventgroupID": "0x0001",
+      "SendStrategy": "Trigger",
+      "CycleTime": null,
+      "E2EProfile": null,
+      "E2EOffset": null,
+      "E2EDataID": null,
+      "Parameters": [
+        {
+          "Position": null,
+          "ParameterName": "IntellgntSwtDecoupSts",
+          "ParameterDescription": null,
+          "IN/OUT": null,
+          "DatatypeReferenceName": "IntellgntSwtDecoupSts_Array",
+          "DatatypeReference": {
+            "DatatypeName": "IntellgntSwtDecoupSts_Array",
+            "DatatypeVersion": 0.1,
+            "DatatypeDescription": null,
+            "Datatype": "Array",
+            "ArrayInfo": {
+              "ArrayMin": 0,
+              "ArrayMax": 100
+            },
+            "ElementType": {
+              "DatatypeName": "Integer_uint8",
+              "DatatypeVersion": 0.1,
+              "DatatypeDescription": null,
+              "Datatype": "Integer",
+              "MinValue": 0,
+              "MaxValue": 255,
+              "TypedefReference": {
+                "DatatypeName": "uint8",
+                "Datatype": "BasicType"
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

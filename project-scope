@@ -1,0 +1,10 @@
+### 项目需求
+开发一个测试工具， 用于测试工程师   和对手件测试someip协议。
+
+### 项目范围
+支持模拟客户端和服务端
+支持同时启动多个服务
+支持启动服务器， 服务发现， offer servive, find service
+支持同时多个订阅， event
+支持 method 调用
+支持 field setter/getter/notification

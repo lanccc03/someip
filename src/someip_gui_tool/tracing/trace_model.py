@@ -13,12 +13,15 @@ class RunLogEntry(BaseModel):
 
     timestamp: datetime
     level: str
+    source: str
     message: str
-    context: dict[str, Any] = Field(default_factory=dict)
+    service_id: str | None = None
+    element_id: str | None = None
+    error_detail: str | None = None
 
 
 class MessageTraceEntry(BaseModel):
-    model_config = ConfigDict(use_enum_values=False)
+    model_config = ConfigDict(use_enum_values=True)
 
     timestamp: datetime
     direction: TraceDirection
@@ -33,6 +36,13 @@ class MessageTraceEntry(BaseModel):
     transport: TransportProtocol
     local_endpoint: str
     remote_endpoint: str
+    session_id: str | None = None
+    message_type: str | None = None
+    return_code: str | None = None
+    rr_ff: str | None = None
     raw_payload_hex: str
     decoded_payload: dict[str, Any] = Field(default_factory=dict)
+    payload_decode_status: str = "ok"
+    duration_ms: float | None = None
     result: str
+    error_message: str | None = None

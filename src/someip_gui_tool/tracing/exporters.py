@@ -22,9 +22,16 @@ TRACE_CSV_FIELDS = [
     "transport",
     "local_endpoint",
     "remote_endpoint",
+    "session_id",
+    "message_type",
+    "return_code",
+    "rr_ff",
     "raw_payload_hex",
     "decoded_payload",
+    "payload_decode_status",
+    "duration_ms",
     "result",
+    "error_message",
 ]
 
 
@@ -39,10 +46,19 @@ def export_run_log_json(entries: list[RunLogEntry]) -> str:
 def export_run_log_text(entries: list[RunLogEntry]) -> str:
     lines = []
     for entry in entries:
-        line = f"{entry.timestamp.isoformat()} [{entry.level}] {entry.message}"
-        if entry.context:
-            context_text = json.dumps(entry.context, ensure_ascii=False, sort_keys=True)
-            line = f"{line} {context_text}"
+        line = f"{entry.timestamp.isoformat()} [{entry.level}] {entry.source}: {entry.message}"
+        details = {
+            key: value
+            for key, value in {
+                "service_id": entry.service_id,
+                "element_id": entry.element_id,
+                "error_detail": entry.error_detail,
+            }.items()
+            if value is not None
+        }
+        if details:
+            detail_text = json.dumps(details, ensure_ascii=False, sort_keys=True)
+            line = f"{line} {detail_text}"
         lines.append(line)
     return "\n".join(lines)
 

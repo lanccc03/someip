@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "someip-gui-tool"
+version = "0.1.0"
+description = "PySide SOME/IP manual test tool"
+requires-python = ">=3.11"
+dependencies = [
+  "pydantic>=2.7,<3",
+  "PySide6>=6.7,<7",
+  "qasync>=0.27,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8,<9",
+  "pytest-qt>=4.4,<5",
+  "pyinstaller>=6,<7",
+]
+someipy = [
+  "someipy>=2.1,<3",
+]
+
+[project.scripts]
+someip-gui-tool = "someip_gui_tool.gui.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"

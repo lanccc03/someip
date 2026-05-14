@@ -212,11 +212,12 @@ def test_real_run_starts_daemon_and_passes_matching_client_config(adc40_soc_dir,
     assert report.steps[1].status is SpikeStatus.PASS
     assert len(started) == 1
     assert started[0][0].interface == "127.0.0.42"
-    assert api.connect_kwargs == {
+    assert api.connect_config == {
         "use_tcp": True,
         "tcp_host": "127.0.0.1",
         "tcp_port": 30500,
     }
+    assert api.connect_kwargs == {}
     assert daemon_process.stopped is True
 
 
@@ -226,7 +227,7 @@ async def test_real_async_runs_scenarios_and_event_paths(adc40_soc_dir, monkeypa
         raise AssertionError("runner must use protocol_for")
 
     monkeypatch.setattr(SomeipyServiceFactory, "_protocol", forbidden_private_protocol)
-    api = _FakeSomeipyApi()
+    api = _FakeSomeipyApi(availability_sequences=[[True], [True], [False, True], [True], [True]])
 
     steps = await ProtocolSpikeRunner(adc40_soc_dir)._run_real_async(
         api=api,
@@ -241,7 +242,13 @@ async def test_real_async_runs_scenarios_and_event_paths(adc40_soc_dir, monkeypa
         "tcp-event",
         "field-getter-notifier",
     ]
-    assert [step.status for step in steps] == [SpikeStatus.PASS] * 5
+    assert [step.status for step in steps] == [
+        SpikeStatus.SKIP,
+        SpikeStatus.SKIP,
+        SpikeStatus.PASS,
+        SpikeStatus.PASS,
+        SpikeStatus.PASS,
+    ]
     assert [server.start_awaited for server in api.servers] == [True] * 5
     assert [server.stop_awaited for server in api.servers] == [True] * 5
     assert [server.endpoint_port for server in api.servers] == [
@@ -258,7 +265,7 @@ async def test_real_async_runs_scenarios_and_event_paths(adc40_soc_dir, monkeypa
         31031,
         31041,
     ]
-    assert [client.is_available_awaited for client in api.clients] == [True] * 5
+    assert [client.is_available_calls for client in api.clients] == [1, 1, 2, 1, 1]
     assert api.daemon.disconnect_awaited is True
 
     subscriptions = [
@@ -281,10 +288,97 @@ async def test_real_async_runs_scenarios_and_event_paths(adc40_soc_dir, monkeypa
         (0x080A, 0x0001, 0x8001, "010203"),
         (0x080C, 0x0001, 0x9001, "01"),
     ]
+    delivered_events = [
+        (client.service.service_id, event_id, payload.hex())
+        for client in api.clients
+        for event_id, payload in client.received_events
+    ]
+    assert delivered_events == [
+        (0x080E, 0x8001, "4148000042c68000"),
+        (0x080A, 0x8001, "010203"),
+        (0x080C, 0x9001, "01"),
+    ]
+    assert api.clients[0].method_calls == []
+    assert api.clients[1].method_calls == []
+    assert "fire-and-forget" in steps[0].detail
+    assert "fire-and-forget" in steps[1].detail
     field_step = steps[-1]
     assert field_step.data["getter_id"] == "0x1001"
     assert field_step.data["notifier_id"] == "0x9001"
+    assert field_step.data["getter_response_payload_hex"] == "01"
     assert "notifier" in field_step.detail
+    assert "getter" in field_step.detail
+
+
+@pytest.mark.asyncio
+async def test_real_async_invokes_rr_method_and_validates_response(adc40_soc_dir, monkeypatch):
+    scenario = build_scenarios(adc40_soc_dir)[1]
+    assert scenario.method is not None
+    rr_scenario = replace(scenario, method=replace(scenario.method, rr_ff="RR"))
+    monkeypatch.setattr(
+        "someip_gui_tool.spike.runner.build_scenarios",
+        lambda definition_root: [rr_scenario],
+    )
+    api = _FakeSomeipyApi()
+
+    steps = await ProtocolSpikeRunner(adc40_soc_dir)._run_real_async(
+        api=api,
+        local_ip="127.0.0.1",
+        base_port=31000,
+    )
+
+    assert len(steps) == 1
+    assert steps[0].status is SpikeStatus.PASS
+    assert "method response payload" in steps[0].detail
+    assert steps[0].data["request_payload_hex"] == "0000000000000001"
+    assert steps[0].data["response_payload_hex"] == "0000000000000001"
+    assert api.clients[0].method_calls == [(0x0001, bytes.fromhex("0000000000000001"))]
+    assert api.method_handler_calls == [
+        (0x0F01, 0x0001, bytes.fromhex("0000000000000001"), ("127.0.0.1", 31001))
+    ]
+
+
+@pytest.mark.asyncio
+async def test_real_async_fails_when_event_delivery_times_out(adc40_soc_dir, monkeypatch):
+    monkeypatch.setattr("someip_gui_tool.spike.runner.REAL_RUN_EVENT_TIMEOUT_S", 0.001)
+    scenario = build_scenarios(adc40_soc_dir)[2]
+    monkeypatch.setattr(
+        "someip_gui_tool.spike.runner.build_scenarios",
+        lambda definition_root: [scenario],
+    )
+    api = _FakeSomeipyApi(deliver_events=False)
+
+    steps = await ProtocolSpikeRunner(adc40_soc_dir)._run_real_async(
+        api=api,
+        local_ip="127.0.0.1",
+        base_port=31000,
+    )
+
+    assert len(steps) == 1
+    assert steps[0].status is SpikeStatus.FAIL
+    assert "delivery timed out" in steps[0].detail
+
+
+@pytest.mark.asyncio
+async def test_real_async_marks_unavailable_after_poll_attempts(adc40_soc_dir, monkeypatch):
+    monkeypatch.setattr("someip_gui_tool.spike.runner.REAL_RUN_AVAILABILITY_DELAY_S", 0)
+    scenario = build_scenarios(adc40_soc_dir)[2]
+    monkeypatch.setattr(
+        "someip_gui_tool.spike.runner.build_scenarios",
+        lambda definition_root: [scenario],
+    )
+    api = _FakeSomeipyApi(availability_sequences=[[False, False, False]])
+
+    steps = await ProtocolSpikeRunner(adc40_soc_dir)._run_real_async(
+        api=api,
+        local_ip="127.0.0.1",
+        base_port=31000,
+    )
+
+    assert len(steps) == 1
+    assert steps[0].status is SpikeStatus.FAIL
+    assert "availability=False" in steps[0].detail
+    assert api.clients[0].is_available_calls == 3
 
 
 @pytest.mark.asyncio
@@ -356,6 +450,13 @@ class _FakeEventGroup:
         self.events = events
 
 
+class _FakeMethodResult:
+    def __init__(self):
+        self.message_type = None
+        self.return_code = None
+        self.payload = b""
+
+
 class _FakeBuilder:
     def __init__(self):
         self.service_id = None
@@ -412,21 +513,58 @@ class _FakeServerServiceInstance:
 
     def send_event(self, eventgroup_id, event_id, payload):
         self.sent_events.append((eventgroup_id, event_id, payload))
+        if not self.api.deliver_events:
+            return
+        for client in self.api.clients:
+            if client.service.service_id != self.service.service_id:
+                continue
+            for callback in client.callbacks:
+                callback(event_id, payload)
 
 
 class _FakeClientServiceInstance:
     def __init__(self, **kwargs):
         self.__dict__.update(kwargs)
-        self.is_available_awaited = False
+        self.is_available_calls = 0
         self.subscriptions = []
+        self.callbacks = []
+        self.received_events = []
+        self.method_calls = []
         self.api.clients.append(self)
 
     async def is_available(self):
-        self.is_available_awaited = True
-        return True
+        self.is_available_calls += 1
+        sequence = self.api.availability_sequences[len(self.api.clients) - 1]
+        if self.is_available_calls <= len(sequence):
+            return sequence[self.is_available_calls - 1]
+        return sequence[-1]
 
     def subscribe_eventgroup(self, eventgroup, ttl_subscription_seconds=None):
         self.subscriptions.append((eventgroup, ttl_subscription_seconds))
+
+    @property
+    def endpoint(self):
+        return (self.endpoint_ip, self.endpoint_port)
+
+    def register_callback(self, callback):
+        def recording_callback(event_id, payload):
+            self.received_events.append((event_id, payload))
+            callback(event_id, payload)
+
+        self.callbacks.append(recording_callback)
+
+    async def call_method(self, method_id, payload):
+        self.method_calls.append((method_id, payload))
+        for server in self.api.servers:
+            if server.service.service_id != self.service.service_id:
+                continue
+            for method in server.service.methods:
+                if method.id == method_id and method.method_handler is not None:
+                    self.api.method_handler_calls.append(
+                        (server.service.service_id, method_id, payload, self.endpoint)
+                    )
+                    return await method.method_handler(payload, self.endpoint)
+        raise RuntimeError(f"method 0x{method_id:04X} not offered")
 
 
 class _FakeDaemon:
@@ -441,19 +579,32 @@ class _FakeSomeipyApi:
     Method = _FakeMethod
     Event = _FakeEvent
     EventGroup = _FakeEventGroup
+    MethodResult = _FakeMethodResult
+    MessageType = SimpleNamespace(RESPONSE="RESPONSE", ERROR="ERROR")
+    ReturnCode = SimpleNamespace(E_OK="E_OK", E_MALFORMED_MESSAGE="E_MALFORMED_MESSAGE")
     ServiceBuilder = _FakeBuilder
     TransportLayerProtocol = SimpleNamespace(TCP="TCP", UDP="UDP")
 
-    def __init__(self, start_error=None):
+    def __init__(
+        self,
+        start_error=None,
+        availability_sequences=None,
+        deliver_events=True,
+    ):
         self.daemon = _FakeDaemon()
         self.servers = []
         self.clients = []
+        self.connect_config = None
         self.connect_kwargs = None
         self.start_error = start_error
+        self.availability_sequences = availability_sequences or [[True]] * 50
+        self.deliver_events = deliver_events
+        self.method_handler_calls = []
         self.ServerServiceInstance = self._server_service_instance
         self.ClientServiceInstance = self._client_service_instance
 
-    async def connect_to_someipy_daemon(self, **kwargs):
+    async def connect_to_someipy_daemon(self, config=None, **kwargs):
+        self.connect_config = config
         self.connect_kwargs = kwargs
         return self.daemon
 

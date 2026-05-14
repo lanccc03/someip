@@ -47,15 +47,42 @@ class SomeipyApiProbe:
         except ImportError as exc:
             return SomeipyApiStatus(available=False, detail=f"someipy import failed: {exc}")
 
-        missing = tuple(name for name in REQUIRED_SOMEIPY_SYMBOLS if not hasattr(module, name))
-        if missing:
-            return SomeipyApiStatus(
-                available=False,
-                detail="someipy API missing required symbols: " + ", ".join(missing),
-                missing_symbols=missing,
-            )
+        symbol_status = self._probe_required_symbols(module)
+        if symbol_status is not None:
+            return symbol_status
+
         self._module = module
         return SomeipyApiStatus(available=True, detail="someipy API is available")
+
+    def _probe_required_symbols(self, module: object) -> SomeipyApiStatus | None:
+        missing: list[str] = []
+        for name in REQUIRED_SOMEIPY_SYMBOLS:
+            try:
+                getattr(module, name)
+            except AttributeError:
+                missing.append(name)
+            except ModuleNotFoundError as exc:
+                return SomeipyApiStatus(
+                    available=False,
+                    detail=(
+                        f"someipy API symbol {name} import failed due to missing "
+                        f"dependency: {exc.name}"
+                    ),
+                )
+            except ImportError as exc:
+                return SomeipyApiStatus(
+                    available=False,
+                    detail=f"someipy API symbol {name} import failed: {exc}",
+                )
+
+        missing_symbols = tuple(missing)
+        if missing_symbols:
+            return SomeipyApiStatus(
+                available=False,
+                detail="someipy API missing required symbols: " + ", ".join(missing_symbols),
+                missing_symbols=missing_symbols,
+            )
+        return None
 
     def require_module(self) -> ModuleType:
         if self._module is None:

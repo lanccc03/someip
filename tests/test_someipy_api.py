@@ -40,6 +40,38 @@ def test_api_probe_reports_generic_import_error():
     assert "broken install" in status.detail
 
 
+def test_api_probe_reports_lazy_symbol_import_error():
+    class FakeLazyApi:
+        def __getattr__(self, name):
+            if name == "Method":
+                raise ImportError("lazy broken")
+            return object()
+
+    probe = SomeipyApiProbe(importer=lambda name: FakeLazyApi())
+
+    status = probe.probe()
+
+    assert status.available is False
+    assert "someipy API symbol Method import failed" in status.detail
+    assert "lazy broken" in status.detail
+
+
+def test_api_probe_reports_lazy_symbol_missing_dependency():
+    class FakeLazyApi:
+        def __getattr__(self, name):
+            if name == "Method":
+                raise ModuleNotFoundError(name="missing_lazy_dep")
+            return object()
+
+    probe = SomeipyApiProbe(importer=lambda name: FakeLazyApi())
+
+    status = probe.probe()
+
+    assert status.available is False
+    assert "missing dependency" in status.detail
+    assert "missing_lazy_dep" in status.detail
+
+
 def test_api_probe_reports_missing_symbols():
     fake = SimpleNamespace(ServiceBuilder=object)
     probe = SomeipyApiProbe(importer=lambda name: fake)

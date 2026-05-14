@@ -1,16 +1,43 @@
 from types import SimpleNamespace
 
+import pytest
+
 from someip_gui_tool.adapters.someipy_api import SomeipyApiProbe, SomeipyApiStatus
 
 
 def test_api_probe_reports_missing_module(monkeypatch):
-    probe = SomeipyApiProbe(importer=lambda name: (_ for _ in ()).throw(ModuleNotFoundError(name)))
+    probe = SomeipyApiProbe(
+        importer=lambda name: (_ for _ in ()).throw(ModuleNotFoundError(name=name))
+    )
 
     status = probe.probe()
 
     assert status.available is False
     assert "not installed" in status.detail
     assert "python -m pip install -e .[someipy]" in status.detail
+
+
+def test_api_probe_reports_missing_dependency():
+    probe = SomeipyApiProbe(
+        importer=lambda name: (_ for _ in ()).throw(ModuleNotFoundError(name="missing_dep"))
+    )
+
+    status = probe.probe()
+
+    assert status.available is False
+    assert "not installed" not in status.detail
+    assert "missing dependency" in status.detail
+    assert "missing_dep" in status.detail
+
+
+def test_api_probe_reports_generic_import_error():
+    probe = SomeipyApiProbe(importer=lambda name: (_ for _ in ()).throw(ImportError("broken install")))
+
+    status = probe.probe()
+
+    assert status.available is False
+    assert "someipy import failed" in status.detail
+    assert "broken install" in status.detail
 
 
 def test_api_probe_reports_missing_symbols():
@@ -45,3 +72,28 @@ def test_api_probe_returns_module_when_required_symbols_exist():
     assert status.available is True
     assert status.detail == "someipy API is available"
     assert module is fake
+
+
+def test_api_probe_clears_stale_module_after_failed_probe():
+    names = [
+        "ServiceBuilder",
+        "Method",
+        "Event",
+        "EventGroup",
+        "TransportLayerProtocol",
+        "ClientServiceInstance",
+        "ServerServiceInstance",
+        "connect_to_someipy_daemon",
+    ]
+    full_api = SimpleNamespace(**{name: object() for name in names})
+    incomplete_api = SimpleNamespace(ServiceBuilder=object)
+    modules = iter([full_api, incomplete_api, incomplete_api])
+    probe = SomeipyApiProbe(importer=lambda name: next(modules))
+
+    available_status = probe.probe()
+    failed_status = probe.probe()
+
+    assert available_status.available is True
+    assert failed_status.available is False
+    with pytest.raises(RuntimeError):
+        probe.require_module()

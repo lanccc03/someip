@@ -31,13 +31,21 @@ class SomeipyApiProbe:
         self._module: object | None = None
 
     def probe(self) -> SomeipyApiStatus:
+        self._module = None
         try:
             module = self._importer("someipy")
-        except ModuleNotFoundError:
+        except ModuleNotFoundError as exc:
+            if exc.name == "someipy":
+                return SomeipyApiStatus(
+                    available=False,
+                    detail="someipy is not installed. Install with: python -m pip install -e .[someipy]",
+                )
             return SomeipyApiStatus(
                 available=False,
-                detail="someipy is not installed. Install with: python -m pip install -e .[someipy]",
+                detail=f"someipy import failed due to missing dependency: {exc.name}",
             )
+        except ImportError as exc:
+            return SomeipyApiStatus(available=False, detail=f"someipy import failed: {exc}")
 
         missing = tuple(name for name in REQUIRED_SOMEIPY_SYMBOLS if not hasattr(module, name))
         if missing:

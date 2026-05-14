@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import subprocess
@@ -81,3 +82,93 @@ def test_script_runs_with_local_src_bootstrap() -> None:
 
     assert result.returncode == 0
     assert "someipy-protocol-spike-dry-run" in result.stdout
+
+
+def test_default_definition_root_resolves_from_script_repo(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    script_path = repo_root / "scripts" / "run_protocol_spike.py"
+
+    result = subprocess.run(
+        [sys.executable, str(script_path)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "someipy-protocol-spike-dry-run" in result.stdout
+
+
+def test_real_mode_forwards_options_and_writes_failed_json(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    report_path = tmp_path / "real-report.json"
+    script_module = _load_protocol_spike_script()
+    calls = []
+
+    class FakeReport:
+        failed = True
+
+        def as_text(self):
+            return "fake real report"
+
+        def as_dict(self):
+            return {"name": "fake-real", "failed": True}
+
+    class FakeRunner:
+        def __init__(self, definition_root):
+            self.definition_root = definition_root
+
+        def run_real(self, *, local_ip, base_port, start_daemon):
+            calls.append(
+                {
+                    "definition_root": self.definition_root,
+                    "local_ip": local_ip,
+                    "base_port": base_port,
+                    "start_daemon": start_daemon,
+                }
+            )
+            return FakeReport()
+
+    monkeypatch.setattr(script_module, "ProtocolSpikeRunner", FakeRunner)
+
+    exit_code = script_module.main(
+        [
+            "--mode",
+            "real",
+            "--local-ip",
+            "127.0.0.42",
+            "--base-port",
+            "32000",
+            "--start-daemon",
+            "--json-report",
+            str(report_path),
+        ]
+    )
+
+    assert exit_code == 1
+    assert calls == [
+        {
+            "definition_root": Path(__file__).resolve().parents[1] / "ADC40_SOC",
+            "local_ip": "127.0.0.42",
+            "base_port": 32000,
+            "start_daemon": True,
+        }
+    ]
+    assert json.loads(report_path.read_text(encoding="utf-8")) == {
+        "name": "fake-real",
+        "failed": True,
+    }
+
+
+def _load_protocol_spike_script():
+    repo_root = Path(__file__).resolve().parents[1]
+    script_path = repo_root / "scripts" / "run_protocol_spike.py"
+    spec = importlib.util.spec_from_file_location("run_protocol_spike_under_test", script_path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module

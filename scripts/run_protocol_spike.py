@@ -5,7 +5,8 @@ import json
 import sys
 from pathlib import Path
 
-SRC_DIR = Path(__file__).resolve().parents[1] / "src"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SRC_DIR = REPO_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
@@ -25,7 +26,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
-    runner = ProtocolSpikeRunner(Path(args.definition_root))
+    definition_root = _resolve_definition_root(Path(args.definition_root))
+    runner = ProtocolSpikeRunner(definition_root)
     if args.mode == "dry-run":
         report = runner.run_dry()
     else:
@@ -42,6 +44,12 @@ def main(argv: list[str] | None = None) -> int:
             encoding="utf-8",
         )
     return 1 if report.failed else 0
+
+
+def _resolve_definition_root(definition_root: Path) -> Path:
+    if definition_root.is_absolute():
+        return definition_root
+    return REPO_ROOT / definition_root
 
 
 if __name__ == "__main__":

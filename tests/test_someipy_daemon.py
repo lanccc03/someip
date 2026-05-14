@@ -39,9 +39,8 @@ class ExitedPopen(FakePopen):
     def __init__(self, args, cwd=None, stdout=None, stderr=None):
         super().__init__(args, cwd=cwd, stdout=stdout, stderr=stderr)
         self.returncode = 2
-
-    def communicate(self):
-        return b"", b"daemon bind failed"
+        stderr.write(b"daemon bind failed")
+        stderr.flush()
 
 
 class TimeoutPopen(FakePopen):
@@ -119,10 +118,16 @@ def test_process_start_uses_someipyd_config(monkeypatch, tmp_path):
     assert "--config" in process.process.args
     assert Path(process.process.args[-1]).exists()
     assert process.process.cwd == str(tmp_path)
-    assert process.process.stdout == subprocess.PIPE
-    assert process.process.stderr == subprocess.PIPE
+    assert process.process.stdout != subprocess.PIPE
+    assert process.process.stderr != subprocess.PIPE
+    assert process.stdout_log_path == tmp_path / "someipyd-stdout.log"
+    assert process.stderr_log_path == tmp_path / "someipyd-stderr.log"
+    assert process.stdout_log_path.exists()
+    assert process.stderr_log_path.exists()
     process.stop()
     assert process.process.terminated is True
+    assert process.stdout_log_path.exists()
+    assert process.stderr_log_path.exists()
 
 
 def test_process_start_fails_when_daemon_exits_immediately(monkeypatch, tmp_path):
@@ -153,6 +158,24 @@ def test_process_start_failure_includes_daemon_stderr(monkeypatch, tmp_path):
             work_dir=tmp_path,
             startup_timeout_s=0,
         )
+
+
+def test_process_stop_closes_log_handles(monkeypatch, tmp_path):
+    monkeypatch.setattr("shutil.which", lambda command: "C:/tools/someipyd.exe")
+    monkeypatch.setattr(
+        "subprocess.Popen",
+        lambda args, cwd=None, stdout=None, stderr=None: FakePopen(args, cwd=cwd, stdout=stdout, stderr=stderr),
+    )
+    process = SomeipydProcess.start(
+        config=SomeipydConfig(interface="127.0.0.1"),
+        work_dir=tmp_path,
+        startup_timeout_s=0,
+    )
+
+    process.stop()
+
+    assert process.stdout_log.closed is True
+    assert process.stderr_log.closed is True
 
 
 def test_process_stop_kills_when_terminate_times_out(tmp_path):

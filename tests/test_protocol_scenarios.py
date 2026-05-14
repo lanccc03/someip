@@ -1,6 +1,9 @@
+from dataclasses import replace
+
+from someip_gui_tool.domain.models import FieldDefinition
 from someip_gui_tool.spike.result import SpikeStatus
 from someip_gui_tool.spike.runner import ProtocolSpikeRunner
-from someip_gui_tool.spike.scenarios import ScenarioKind, build_scenarios
+from someip_gui_tool.spike.scenarios import ProtocolScenario, ScenarioKind, build_scenarios
 
 
 def test_builds_required_scenarios(adc40_soc_dir):
@@ -36,6 +39,10 @@ def test_builds_required_scenarios(adc40_soc_dir):
     assert scenarios[3].payload_values == {"IntellgntSwtDecoupSts": [1, 2, 3]}
     assert scenarios[4].field is not None
     assert scenarios[4].field.name == "VertHeiRmdSts"
+    assert scenarios[4].field.getter is not None
+    assert scenarios[4].field.getter.element_id == 0x1001
+    assert scenarios[4].field.notifier is not None
+    assert scenarios[4].field.notifier.element_id == 0x9001
     assert scenarios[4].payload_values == {"VertHeiRmdSts": 1}
 
 
@@ -60,3 +67,87 @@ def test_dry_run_validates_payloads_and_services(adc40_soc_dir):
         "0x080C",
     ]
     assert all(step.data["payload_hex"] for step in report.steps)
+
+    assert report.steps[0].data == {
+        "service_id": "0x080D",
+        "payload_hex": "01",
+        "transport": "UDP",
+        "method_id": "0x0001",
+        "rr_ff": "FF",
+    }
+    assert report.steps[1].data == {
+        "service_id": "0x0F01",
+        "payload_hex": "0000000000000001",
+        "transport": "TCP",
+        "method_id": "0x0001",
+        "rr_ff": "FF",
+    }
+    assert report.steps[2].data == {
+        "service_id": "0x080E",
+        "payload_hex": "4148000042c68000",
+        "transport": "UDP",
+        "event_id": "0x8001",
+        "send_strategy": "Cycle",
+        "eventgroup_id": "0x0001",
+    }
+    assert report.steps[3].data == {
+        "service_id": "0x080A",
+        "payload_hex": "010203",
+        "transport": "TCP",
+        "event_id": "0x8001",
+        "send_strategy": "Trigger",
+        "eventgroup_id": "0x0001",
+    }
+    assert report.steps[4].data == {
+        "service_id": "0x080C",
+        "payload_hex": "01",
+        "transport": "TCP",
+        "getter_id": "0x1001",
+        "notifier_id": "0x9001",
+        "notifier_eventgroup_id": "0x0001",
+        "getter_transport": "TCP",
+        "notifier_transport": "TCP",
+    }
+
+
+def test_dry_run_fails_when_field_getter_is_missing(adc40_soc_dir):
+    scenario = _field_scenario(adc40_soc_dir)
+    assert scenario.field is not None
+    scenario = replace(
+        scenario,
+        field=FieldDefinition(
+            name=scenario.field.name,
+            getter=None,
+            setter=scenario.field.setter,
+            notifier=scenario.field.notifier,
+        ),
+    )
+
+    step = ProtocolSpikeRunner(adc40_soc_dir)._dry_step(scenario)
+
+    assert step.status is SpikeStatus.FAIL
+    assert "getter" in step.detail
+
+
+def test_dry_run_fails_when_field_notifier_id_is_wrong(adc40_soc_dir):
+    scenario = _field_scenario(adc40_soc_dir)
+    assert scenario.field is not None
+    assert scenario.field.notifier is not None
+    scenario = replace(
+        scenario,
+        field=FieldDefinition(
+            name=scenario.field.name,
+            getter=scenario.field.getter,
+            setter=scenario.field.setter,
+            notifier=replace(scenario.field.notifier, element_id=0x9002),
+        ),
+    )
+
+    step = ProtocolSpikeRunner(adc40_soc_dir)._dry_step(scenario)
+
+    assert step.status is SpikeStatus.FAIL
+    assert "notifier" in step.detail
+
+
+def _field_scenario(adc40_soc_dir) -> ProtocolScenario:
+    return build_scenarios(adc40_soc_dir)[4]

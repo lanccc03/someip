@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from ipaddress import ip_interface
 from types import MappingProxyType
 
 from someip_gui_tool.domain.enums import Role, TransportProtocol
@@ -125,7 +126,8 @@ def validate_runtime_config(
                 service_id=service.service_id,
             )
         )
-    if not config.local_ip.strip():
+    local_ip = config.local_ip.strip()
+    if not local_ip:
         problems.append(
             RuntimeProblem(
                 code="local_ip_missing",
@@ -134,7 +136,17 @@ def validate_runtime_config(
                 service_id=service.service_id,
             )
         )
-    if not config.remote_ip.strip():
+    elif not _is_valid_ip(local_ip):
+        problems.append(
+            RuntimeProblem(
+                code="local_ip_invalid",
+                severity="error",
+                message=f"Local IP {config.local_ip!r} is not a valid IP address.",
+                service_id=service.service_id,
+            )
+        )
+    remote_ip = config.remote_ip.strip()
+    if not remote_ip:
         problems.append(
             RuntimeProblem(
                 code="remote_ip_missing",
@@ -143,7 +155,17 @@ def validate_runtime_config(
                 service_id=service.service_id,
             )
         )
-    if not config.multicast_ip.strip():
+    elif not _is_valid_ip(remote_ip):
+        problems.append(
+            RuntimeProblem(
+                code="remote_ip_invalid",
+                severity="error",
+                message=f"Remote IP {config.remote_ip!r} is not a valid IP address.",
+                service_id=service.service_id,
+            )
+        )
+    multicast_ip = config.multicast_ip.strip()
+    if not multicast_ip:
         problems.append(
             RuntimeProblem(
                 code="multicast_ip_missing",
@@ -152,11 +174,28 @@ def validate_runtime_config(
                 service_id=service.service_id,
             )
         )
+    elif not _is_valid_ip(multicast_ip):
+        problems.append(
+            RuntimeProblem(
+                code="multicast_ip_invalid",
+                severity="warning",
+                message=f"Multicast IP {config.multicast_ip!r} is not a valid IP address.",
+                service_id=service.service_id,
+            )
+        )
     return problems
 
 
 def _is_valid_port(port: int) -> bool:
     return 1 <= port <= 65535
+
+
+def _is_valid_ip(value: str) -> bool:
+    try:
+        ip_interface(value)
+    except ValueError:
+        return False
+    return True
 
 
 def _freeze_payload_default(value: object) -> object:

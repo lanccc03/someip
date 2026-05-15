@@ -5,7 +5,11 @@ from typing import Any
 
 from someip_gui_tool.adapters.base import AdapterEvent, AdapterMethodResult, SomeIpAdapter
 from someip_gui_tool.codec.payload_codec import PayloadCodec
-from someip_gui_tool.core.runtime_config import RuntimeServiceConfig, validate_runtime_config
+from someip_gui_tool.core.runtime_config import (
+    RuntimeProblem,
+    RuntimeServiceConfig,
+    validate_runtime_config,
+)
 from someip_gui_tool.domain.enums import Role, TraceDirection, TransportProtocol
 from someip_gui_tool.domain.models import (
     EventDefinition,
@@ -21,6 +25,7 @@ class RuntimeSession:
     def __init__(self, adapter: SomeIpAdapter, codec: PayloadCodec | None = None) -> None:
         self.adapter = adapter
         self.codec = codec or PayloadCodec()
+        self.problems: list[RuntimeProblem] = []
         self.run_log: list[RunLogEntry] = []
         self.trace: list[MessageTraceEntry] = []
         self._configs: dict[int, RuntimeServiceConfig] = {}
@@ -34,6 +39,7 @@ class RuntimeSession:
         config: RuntimeServiceConfig,
     ) -> None:
         problems = validate_runtime_config(service, config)
+        self.problems.extend(problems)
         for problem in problems:
             self._log(
                 problem.severity,
@@ -46,7 +52,16 @@ class RuntimeSession:
         if errors:
             problem_codes = ", ".join(problem.code for problem in errors)
             raise ValueError(f"Runtime config invalid: {problem_codes}")
-        await self.adapter.start_service(service)
+        try:
+            await self.adapter.start_service(service)
+        except Exception as exc:
+            self._record_adapter_exception(
+                "start_service_adapter_exception",
+                service,
+                f"Adapter failed to start service {service.service_name}",
+                exc,
+            )
+            raise
         self._configs[service.service_id] = config
         self._active_service_ids.add(service.service_id)
         self._log(
@@ -57,7 +72,16 @@ class RuntimeSession:
         )
 
     async def stop_service(self, service: ServiceDefinition) -> None:
-        await self.adapter.stop_service(service)
+        try:
+            await self.adapter.stop_service(service)
+        except Exception as exc:
+            self._record_adapter_exception(
+                "stop_service_adapter_exception",
+                service,
+                f"Adapter failed to stop service {service.service_name}",
+                exc,
+            )
+            raise
         self._active_service_ids.discard(service.service_id)
         self._configs.pop(service.service_id, None)
         self._registered_trace_keys = {
@@ -92,7 +116,17 @@ class RuntimeSession:
                 rr_ff=method.rr_ff,
                 error=exc,
             )
-        result = await self.adapter.call_method(service, method, payload)
+        try:
+            result = await self.adapter.call_method(service, method, payload)
+        except Exception as exc:
+            self._record_adapter_exception(
+                "call_method_adapter_exception",
+                service,
+                f"Adapter failed to call method {method.name}",
+                exc,
+                element_id=method.method_id_hex,
+            )
+            raise
         self._trace(
             service=service,
             role=Role.CLIENT,
@@ -122,8 +156,15 @@ class RuntimeSession:
                 result_status=result.status,
                 rr_ff=method.rr_ff,
             )
+        log_level = "error" if result.status == "error" else "info"
+        if result.status == "error":
+            self._record_adapter_result_problem(
+                "call_method_adapter_error",
+                service,
+                f"Adapter returned error for method {method.name}: {result.detail}",
+            )
         self._log(
-            "info",
+            log_level,
             "Core",
             f"Called method {method.name} result={result.status}",
             service_id=service.service_id_hex,
@@ -135,7 +176,17 @@ class RuntimeSession:
     async def subscribe_event(self, service: ServiceDefinition, event: EventDefinition) -> None:
         if event.eventgroup_id is None:
             raise ValueError(f"Event {event.name!r} has no eventgroup id")
-        await self.adapter.subscribe_eventgroup(service, event.eventgroup_id)
+        try:
+            await self.adapter.subscribe_eventgroup(service, event.eventgroup_id)
+        except Exception as exc:
+            self._record_adapter_exception(
+                "subscribe_event_adapter_exception",
+                service,
+                f"Adapter failed to subscribe event {event.name}",
+                exc,
+                element_id=event.event_id_hex,
+            )
+            raise
         self._log(
             "info",
             "Core",
@@ -166,7 +217,17 @@ class RuntimeSession:
                 error=exc,
             )
             raise
-        await self.adapter.publish_event(service, event, payload)
+        try:
+            await self.adapter.publish_event(service, event, payload)
+        except Exception as exc:
+            self._record_adapter_exception(
+                "publish_event_adapter_exception",
+                service,
+                f"Adapter failed to publish event {event.name}",
+                exc,
+                element_id=event.event_id_hex,
+            )
+            raise
         self._trace(
             service=service,
             role=Role.SERVER,
@@ -213,7 +274,17 @@ class RuntimeSession:
                 rr_ff=None,
                 error=exc,
             )
-        result = await self.adapter.field_get(service, field, payload)
+        try:
+            result = await self.adapter.field_get(service, field, payload)
+        except Exception as exc:
+            self._record_adapter_exception(
+                "field_get_adapter_exception",
+                service,
+                f"Adapter failed to get field {field.name}",
+                exc,
+                element_id=_field_part_id_hex(field.getter),
+            )
+            raise
         self._trace_field_part(
             service=service,
             field=field,
@@ -240,8 +311,15 @@ class RuntimeSession:
                 result_status=result.status,
                 rr_ff=None,
             )
+        log_level = "error" if result.status == "error" else "info"
+        if result.status == "error":
+            self._record_adapter_result_problem(
+                "field_get_adapter_error",
+                service,
+                f"Adapter returned error for field getter {field.name}: {result.detail}",
+            )
         self._log(
-            "info",
+            log_level,
             "Core",
             f"Field getter {field.name} result={result.status}",
             service_id=service.service_id_hex,
@@ -297,7 +375,17 @@ class RuntimeSession:
                 rr_ff=None,
                 error=exc,
             )
-        result = await self.adapter.field_set(service, field, payload)
+        try:
+            result = await self.adapter.field_set(service, field, payload)
+        except Exception as exc:
+            self._record_adapter_exception(
+                "field_set_adapter_exception",
+                service,
+                f"Adapter failed to set field {field.name}",
+                exc,
+                element_id=_field_part_id_hex(field.setter),
+            )
+            raise
         self._trace(
             service=service,
             role=Role.CLIENT,
@@ -313,8 +401,15 @@ class RuntimeSession:
             result=result.status,
             error_message=_error_detail(result),
         )
+        log_level = "error" if result.status == "error" else "info"
+        if result.status == "error":
+            self._record_adapter_result_problem(
+                "field_set_adapter_error",
+                service,
+                f"Adapter returned error for field setter {field.name}: {result.detail}",
+            )
         self._log(
-            "info",
+            log_level,
             "Core",
             f"Field setter {field.name} result={result.status}",
             service_id=service.service_id_hex,
@@ -347,7 +442,17 @@ class RuntimeSession:
                 error=exc,
             )
             raise
-        await self.adapter.field_notify(service, field, payload)
+        try:
+            await self.adapter.field_notify(service, field, payload)
+        except Exception as exc:
+            self._record_adapter_exception(
+                "field_notify_adapter_exception",
+                service,
+                f"Adapter failed to notify field {field.name}",
+                exc,
+                element_id=_field_part_id_hex(field.notifier),
+            )
+            raise
         self._trace_field_part(
             service=service,
             field=field,
@@ -377,16 +482,26 @@ class RuntimeSession:
         if key in self._registered_trace_keys:
             return
         generation = self._trace_generation(service)
-        await self.adapter.register_event_handler(
-            service,
-            event,
-            lambda adapter_event: self._append_event_rx_trace(
+        try:
+            await self.adapter.register_event_handler(
                 service,
                 event,
-                adapter_event,
-                generation,
-            ),
-        )
+                lambda adapter_event: self._append_event_rx_trace(
+                    service,
+                    event,
+                    adapter_event,
+                    generation,
+                ),
+            )
+        except Exception as exc:
+            self._record_adapter_exception(
+                "register_event_trace_adapter_exception",
+                service,
+                f"Adapter failed to register event trace for {event.name}",
+                exc,
+                element_id=event.event_id_hex,
+            )
+            raise
         self._registered_trace_keys.add(key)
 
     async def register_field_notifier_trace(
@@ -400,16 +515,26 @@ class RuntimeSession:
         if key in self._registered_trace_keys:
             return
         generation = self._trace_generation(service)
-        await self.adapter.register_field_notifier_handler(
-            service,
-            field,
-            lambda adapter_event: self._append_field_notifier_rx_trace(
+        try:
+            await self.adapter.register_field_notifier_handler(
                 service,
                 field,
-                adapter_event,
-                generation,
-            ),
-        )
+                lambda adapter_event: self._append_field_notifier_rx_trace(
+                    service,
+                    field,
+                    adapter_event,
+                    generation,
+                ),
+            )
+        except Exception as exc:
+            self._record_adapter_exception(
+                "register_field_notifier_trace_adapter_exception",
+                service,
+                f"Adapter failed to register field notifier trace for {field.name}",
+                exc,
+                element_id=_field_part_id_hex(field.notifier),
+            )
+            raise
         self._registered_trace_keys.add(key)
 
     def _append_event_rx_trace(
@@ -619,6 +744,48 @@ class RuntimeSession:
             rr_ff=None,
             result=result,
             error_message=error_message,
+        )
+
+    def _record_adapter_exception(
+        self,
+        code: str,
+        service: ServiceDefinition,
+        message: str,
+        error: Exception,
+        *,
+        element_id: str | None = None,
+    ) -> None:
+        detail = str(error)
+        self.problems.append(
+            RuntimeProblem(
+                code=code,
+                severity="error",
+                message=f"{message}: {detail}",
+                service_id=service.service_id,
+            )
+        )
+        self._log(
+            "error",
+            "Adapter",
+            message,
+            service_id=service.service_id_hex,
+            element_id=element_id,
+            error_detail=detail,
+        )
+
+    def _record_adapter_result_problem(
+        self,
+        code: str,
+        service: ServiceDefinition,
+        message: str,
+    ) -> None:
+        self.problems.append(
+            RuntimeProblem(
+                code=code,
+                severity="error",
+                message=message,
+                service_id=service.service_id,
+            )
         )
 
     def _log(

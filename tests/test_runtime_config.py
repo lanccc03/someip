@@ -128,6 +128,32 @@ def test_validate_runtime_config_rejects_blank_ips_and_multicast(adc40_soc_dir) 
     assert [problem.severity for problem in problems] == ["error", "error", "warning"]
 
 
+def test_validate_runtime_config_rejects_invalid_ip_syntax(adc40_soc_dir) -> None:
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+    config = RuntimeServiceConfig(
+        service_id=service.service_id,
+        instance_id=service.deployment.instance_id,
+        role=Role.CLIENT,
+        local_ip="192.168.0.999",
+        remote_ip="not-an-ip",
+        server_port=30500,
+        client_port=30501,
+        multicast_ip="239.1.1.999",
+    )
+
+    problems = validate_runtime_config(service, config)
+
+    assert [problem.code for problem in problems] == [
+        "local_ip_invalid",
+        "remote_ip_invalid",
+        "multicast_ip_invalid",
+    ]
+    assert [problem.severity for problem in problems] == ["error", "error", "warning"]
+    assert "192.168.0.999" in problems[0].message
+    assert "not-an-ip" in problems[1].message
+    assert "239.1.1.999" in problems[2].message
+
+
 def test_runtime_service_config_payload_defaults_are_immutable(adc40_soc_dir) -> None:
     service = load_service_definition(adc40_soc_dir / "0x080E.json")
     defaults = {

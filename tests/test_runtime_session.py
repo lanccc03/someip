@@ -37,6 +37,34 @@ class ResponsePayloadAdapter(MockSomeIpAdapter):
         )
 
 
+class ErrorResultAdapter(MockSomeIpAdapter):
+    async def call_method(self, service, method, payload):
+        await super().call_method(service, method, payload)
+        return AdapterMethodResult(status="error", detail="method adapter rejected request")
+
+    async def field_get(self, service, field, payload):
+        await super().field_get(service, field, payload)
+        return AdapterMethodResult(status="error", detail="field get adapter rejected request")
+
+    async def field_set(self, service, field, payload):
+        await super().field_set(service, field, payload)
+        return AdapterMethodResult(status="error", detail="field set adapter rejected request")
+
+
+class FailingAdapter(MockSomeIpAdapter):
+    async def start_service(self, service):
+        raise RuntimeError("adapter start failed")
+
+    async def subscribe_eventgroup(self, service, eventgroup_id):
+        raise RuntimeError("adapter subscribe failed")
+
+    async def publish_event(self, service, event, payload):
+        raise RuntimeError("adapter publish failed")
+
+    async def field_notify(self, service, field, payload):
+        raise RuntimeError("adapter notify failed")
+
+
 def _valid_config(service, role=Role.CLIENT) -> RuntimeServiceConfig:
     return replace(
         infer_runtime_config(service, role),
@@ -91,6 +119,75 @@ async def test_runtime_session_rejects_invalid_start_config_before_adapter(adc40
         "server_port_missing",
         "client_port_missing",
     ]
+    assert [problem.code for problem in session.problems] == [
+        "server_port_missing",
+        "client_port_missing",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runtime_session_records_start_service_adapter_exception(adc40_soc_dir):
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+    session = RuntimeSession(adapter=FailingAdapter())
+
+    with pytest.raises(RuntimeError, match="adapter start failed"):
+        await session.start_service(service, _valid_config(service, Role.SERVER))
+
+    assert session.problems[-1].code == "start_service_adapter_exception"
+    assert session.problems[-1].severity == "error"
+    assert "adapter start failed" in session.problems[-1].message
+    assert session.run_log[-1].level == "error"
+    assert session.run_log[-1].error_detail == "adapter start failed"
+
+
+@pytest.mark.asyncio
+async def test_runtime_session_records_subscribe_adapter_exception(adc40_soc_dir):
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+    session = RuntimeSession(adapter=FailingAdapter())
+
+    with pytest.raises(RuntimeError, match="adapter subscribe failed"):
+        await session.subscribe_event(service, service.events[0])
+
+    assert session.problems[-1].code == "subscribe_event_adapter_exception"
+    assert session.problems[-1].severity == "error"
+    assert "adapter subscribe failed" in session.problems[-1].message
+    assert session.run_log[-1].level == "error"
+    assert session.run_log[-1].error_detail == "adapter subscribe failed"
+
+
+@pytest.mark.asyncio
+async def test_runtime_session_records_publish_adapter_exception(adc40_soc_dir):
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+    session = RuntimeSession(adapter=FailingAdapter())
+
+    with pytest.raises(RuntimeError, match="adapter publish failed"):
+        await session.publish_event(
+            service,
+            service.events[0],
+            {"VehicleInfo": {"VehicleSpeed": 12.5, "Odometer": 99.25}},
+        )
+
+    assert session.problems[-1].code == "publish_event_adapter_exception"
+    assert session.problems[-1].severity == "error"
+    assert "adapter publish failed" in session.problems[-1].message
+    assert session.run_log[-1].level == "error"
+    assert session.run_log[-1].error_detail == "adapter publish failed"
+
+
+@pytest.mark.asyncio
+async def test_runtime_session_records_field_notify_adapter_exception(adc40_soc_dir):
+    service = load_service_definition(adc40_soc_dir / "0x080C.json")
+    session = RuntimeSession(adapter=FailingAdapter())
+    field = service.fields[0]
+
+    with pytest.raises(RuntimeError, match="adapter notify failed"):
+        await session.field_notify(service, field, {"VertHeiRmdSts": 1})
+
+    assert session.problems[-1].code == "field_notify_adapter_exception"
+    assert session.problems[-1].severity == "error"
+    assert "adapter notify failed" in session.problems[-1].message
+    assert session.run_log[-1].level == "error"
+    assert session.run_log[-1].error_detail == "adapter notify failed"
 
 
 @pytest.mark.asyncio
@@ -112,6 +209,40 @@ async def test_runtime_session_field_get_and_notify(adc40_soc_dir):
     assert session.trace[1].result == "success"
     assert session.trace[2].element_type == "FieldNotifier"
     assert session.trace[2].result == "success"
+
+
+@pytest.mark.asyncio
+async def test_runtime_session_records_adapter_error_results_as_problems(adc40_soc_dir):
+    method_service = load_service_definition(adc40_soc_dir / "0x080D.json")
+    field_service = load_service_definition(adc40_soc_dir / "0x080C.json")
+    adapter = ErrorResultAdapter()
+    session = RuntimeSession(adapter=adapter)
+    field = replace(field_service.fields[0], setter=field_service.fields[0].getter)
+
+    method_result = await session.call_method(
+        method_service,
+        method_service.methods[0],
+        {"SecondStartCtrlCmd": 1},
+    )
+    get_result = await session.field_get(field_service, field, {"VertHeiRmdSts": 1})
+    set_result = await session.field_set(field_service, field, {"VertHeiRmdSts": 1})
+
+    assert [method_result.status, get_result.status, set_result.status] == [
+        "error",
+        "error",
+        "error",
+    ]
+    assert [problem.code for problem in session.problems] == [
+        "call_method_adapter_error",
+        "field_get_adapter_error",
+        "field_set_adapter_error",
+    ]
+    assert [entry.level for entry in session.run_log[-3:]] == ["error", "error", "error"]
+    assert [entry.error_detail for entry in session.run_log[-3:]] == [
+        "method adapter rejected request",
+        "field get adapter rejected request",
+        "field set adapter rejected request",
+    ]
 
 
 @pytest.mark.asyncio

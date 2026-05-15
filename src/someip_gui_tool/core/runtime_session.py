@@ -24,7 +24,9 @@ class RuntimeSession:
         self.run_log: list[RunLogEntry] = []
         self.trace: list[MessageTraceEntry] = []
         self._configs: dict[int, RuntimeServiceConfig] = {}
+        self._active_service_ids: set[int] = set()
         self._registered_trace_keys: set[tuple[str, int, int]] = set()
+        self._trace_generations: dict[int, int] = {}
 
     async def start_service(
         self,
@@ -46,6 +48,7 @@ class RuntimeSession:
             raise ValueError(f"Runtime config invalid: {problem_codes}")
         await self.adapter.start_service(service)
         self._configs[service.service_id] = config
+        self._active_service_ids.add(service.service_id)
         self._log(
             "info",
             "Core",
@@ -55,6 +58,12 @@ class RuntimeSession:
 
     async def stop_service(self, service: ServiceDefinition) -> None:
         await self.adapter.stop_service(service)
+        self._active_service_ids.discard(service.service_id)
+        self._configs.pop(service.service_id, None)
+        self._registered_trace_keys = {
+            key for key in self._registered_trace_keys if key[1] != service.service_id
+        }
+        self._trace_generations[service.service_id] = self._trace_generation(service) + 1
         self._log(
             "info",
             "Core",
@@ -367,10 +376,16 @@ class RuntimeSession:
         key = ("event", service.service_id, event.event_id)
         if key in self._registered_trace_keys:
             return
+        generation = self._trace_generation(service)
         await self.adapter.register_event_handler(
             service,
             event,
-            lambda adapter_event: self._append_event_rx_trace(service, event, adapter_event),
+            lambda adapter_event: self._append_event_rx_trace(
+                service,
+                event,
+                adapter_event,
+                generation,
+            ),
         )
         self._registered_trace_keys.add(key)
 
@@ -384,6 +399,7 @@ class RuntimeSession:
         key = ("field-notifier", service.service_id, field.notifier.element_id)
         if key in self._registered_trace_keys:
             return
+        generation = self._trace_generation(service)
         await self.adapter.register_field_notifier_handler(
             service,
             field,
@@ -391,6 +407,7 @@ class RuntimeSession:
                 service,
                 field,
                 adapter_event,
+                generation,
             ),
         )
         self._registered_trace_keys.add(key)
@@ -400,7 +417,10 @@ class RuntimeSession:
         service: ServiceDefinition,
         event: EventDefinition,
         adapter_event: AdapterEvent,
+        generation: int,
     ) -> None:
+        if not self._is_trace_callback_active(service, adapter_event, generation):
+            return
         decoded_payload, payload_decode_status, error_message = self._decode_payload(
             event.parameters,
             adapter_event.payload,
@@ -427,8 +447,13 @@ class RuntimeSession:
         service: ServiceDefinition,
         field: FieldDefinition,
         adapter_event: AdapterEvent,
+        generation: int,
     ) -> None:
-        if field.notifier is None:
+        if field.notifier is None or not self._is_trace_callback_active(
+            service,
+            adapter_event,
+            generation,
+        ):
             return
         decoded_payload, payload_decode_status, error_message = self._decode_payload(
             field.notifier.parameters,
@@ -676,6 +701,21 @@ class RuntimeSession:
             config.remote_ip,
             remote_port,
         )
+
+    def _is_trace_callback_active(
+        self,
+        service: ServiceDefinition,
+        adapter_event: AdapterEvent,
+        generation: int,
+    ) -> bool:
+        return (
+            service.service_id in self._active_service_ids
+            and adapter_event.service_id == service.service_id
+            and generation == self._trace_generation(service)
+        )
+
+    def _trace_generation(self, service: ServiceDefinition) -> int:
+        return self._trace_generations.get(service.service_id, 0)
 
 
 def _eventgroup_hex(eventgroup_id: int | None) -> str | None:

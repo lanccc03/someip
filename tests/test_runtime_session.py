@@ -315,6 +315,7 @@ async def test_runtime_session_registers_rx_traces_after_subscription(adc40_soc_
 
     await session.register_event_trace(event_service, event)
     await session.register_event_trace(event_service, event)
+    await session.start_service(event_service, _valid_config(event_service, Role.CLIENT))
     await session.subscribe_event(event_service, event)
     await session.publish_event(
         event_service,
@@ -323,6 +324,7 @@ async def test_runtime_session_registers_rx_traces_after_subscription(adc40_soc_
     )
     await session.register_field_notifier_trace(field_service, field)
     await session.register_field_notifier_trace(field_service, field)
+    await session.start_service(field_service, _valid_config(field_service, Role.CLIENT))
     await adapter.subscribe_eventgroup(field_service, field.notifier.eventgroup_id or 0)
     await session.field_notify(field_service, field, {"VertHeiRmdSts": 1})
 
@@ -334,3 +336,72 @@ async def test_runtime_session_registers_rx_traces_after_subscription(adc40_soc_
     assert rx_entries[1].payload_decode_status == "ok"
     assert [call.name for call in adapter.calls].count("register_event_handler") == 1
     assert [call.name for call in adapter.calls].count("register_field_notifier_handler") == 1
+
+
+@pytest.mark.asyncio
+async def test_runtime_session_trace_callbacks_stop_and_reregister(adc40_soc_dir):
+    event_service = load_service_definition(adc40_soc_dir / "0x080E.json")
+    field_service = load_service_definition(adc40_soc_dir / "0x080C.json")
+    adapter = MockSomeIpAdapter()
+    session = RuntimeSession(adapter=adapter)
+    event = event_service.events[0]
+    field = field_service.fields[0]
+    assert field.notifier is not None
+
+    await session.register_event_trace(event_service, event)
+    await session.start_service(event_service, _valid_config(event_service, Role.CLIENT))
+    await session.subscribe_event(event_service, event)
+    await session.publish_event(
+        event_service,
+        event,
+        {"VehicleInfo": {"VehicleSpeed": 12.5, "Odometer": 99.25}},
+    )
+
+    event_rx_count = _rx_trace_count(session, "Event")
+    assert event_rx_count == 1
+
+    await session.stop_service(event_service)
+    await adapter.publish_event(event_service, event, b"\x41\x48\x00\x00\x42\xc6\x80\x00")
+
+    assert _rx_trace_count(session, "Event") == event_rx_count
+
+    await session.start_service(event_service, _valid_config(event_service, Role.CLIENT))
+    await session.register_event_trace(event_service, event)
+    await session.subscribe_event(event_service, event)
+    await session.publish_event(
+        event_service,
+        event,
+        {"VehicleInfo": {"VehicleSpeed": 12.5, "Odometer": 99.25}},
+    )
+
+    assert _rx_trace_count(session, "Event") == event_rx_count + 1
+
+    await session.register_field_notifier_trace(field_service, field)
+    await session.start_service(field_service, _valid_config(field_service, Role.CLIENT))
+    await adapter.subscribe_eventgroup(field_service, field.notifier.eventgroup_id or 0)
+    await session.field_notify(field_service, field, {"VertHeiRmdSts": 1})
+
+    field_rx_count = _rx_trace_count(session, "FieldNotifier")
+    assert field_rx_count == 1
+
+    await session.stop_service(field_service)
+    await adapter.field_notify(field_service, field, b"\x01")
+
+    assert _rx_trace_count(session, "FieldNotifier") == field_rx_count
+
+    await session.start_service(field_service, _valid_config(field_service, Role.CLIENT))
+    await session.register_field_notifier_trace(field_service, field)
+    await adapter.subscribe_eventgroup(field_service, field.notifier.eventgroup_id or 0)
+    await session.field_notify(field_service, field, {"VertHeiRmdSts": 1})
+
+    assert _rx_trace_count(session, "FieldNotifier") == field_rx_count + 1
+    assert [call.name for call in adapter.calls].count("register_event_handler") == 2
+    assert [call.name for call in adapter.calls].count("register_field_notifier_handler") == 2
+
+
+def _rx_trace_count(session: RuntimeSession, element_type: str) -> int:
+    return sum(
+        1
+        for entry in session.trace
+        if entry.direction == TraceDirection.RX and entry.element_type == element_type
+    )

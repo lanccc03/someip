@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 
 from someip_gui_tool.domain.enums import Role, TransportProtocol
 from someip_gui_tool.domain.models import ServiceDefinition
@@ -27,7 +29,14 @@ class RuntimeServiceConfig:
     transport_override: TransportProtocol | None = None
     offer_ttl_s: float | None = None
     find_ttl_s: float | None = None
-    payload_defaults: dict[str, object] = field(default_factory=dict)
+    payload_defaults: Mapping[str, object] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "payload_defaults",
+            MappingProxyType(dict(self.payload_defaults)),
+        )
 
 
 def infer_runtime_config(service: ServiceDefinition, role: Role) -> RuntimeServiceConfig:
@@ -48,12 +57,50 @@ def validate_runtime_config(
     config: RuntimeServiceConfig,
 ) -> list[RuntimeProblem]:
     problems: list[RuntimeProblem] = []
+    if config.service_id != service.service_id:
+        problems.append(
+            RuntimeProblem(
+                code="service_id_mismatch",
+                severity="error",
+                message=(
+                    "Runtime config service_id "
+                    f"{config.service_id} does not match service definition "
+                    f"{service.service_id}."
+                ),
+                service_id=service.service_id,
+            )
+        )
+    if config.instance_id != service.deployment.instance_id:
+        problems.append(
+            RuntimeProblem(
+                code="instance_id_mismatch",
+                severity="error",
+                message=(
+                    "Runtime config instance_id "
+                    f"{config.instance_id} does not match service definition "
+                    f"{service.deployment.instance_id}."
+                ),
+                service_id=service.service_id,
+            )
+        )
     if config.server_port is None:
         problems.append(
             RuntimeProblem(
                 code="server_port_missing",
                 severity="error",
                 message="Server port must be configured before service start.",
+                service_id=service.service_id,
+            )
+        )
+    elif not _is_valid_port(config.server_port):
+        problems.append(
+            RuntimeProblem(
+                code="server_port_invalid",
+                severity="error",
+                message=(
+                    f"Server port {config.server_port} is outside the valid "
+                    "range 1..65535."
+                ),
                 service_id=service.service_id,
             )
         )
@@ -66,7 +113,19 @@ def validate_runtime_config(
                 service_id=service.service_id,
             )
         )
-    if not config.local_ip:
+    elif not _is_valid_port(config.client_port):
+        problems.append(
+            RuntimeProblem(
+                code="client_port_invalid",
+                severity="error",
+                message=(
+                    f"Client port {config.client_port} is outside the valid "
+                    "range 1..65535."
+                ),
+                service_id=service.service_id,
+            )
+        )
+    if not config.local_ip.strip():
         problems.append(
             RuntimeProblem(
                 code="local_ip_missing",
@@ -75,7 +134,7 @@ def validate_runtime_config(
                 service_id=service.service_id,
             )
         )
-    if not config.remote_ip:
+    if not config.remote_ip.strip():
         problems.append(
             RuntimeProblem(
                 code="remote_ip_missing",
@@ -84,7 +143,7 @@ def validate_runtime_config(
                 service_id=service.service_id,
             )
         )
-    if not config.multicast_ip:
+    if not config.multicast_ip.strip():
         problems.append(
             RuntimeProblem(
                 code="multicast_ip_missing",
@@ -94,3 +153,7 @@ def validate_runtime_config(
             )
         )
     return problems
+
+
+def _is_valid_port(port: int) -> bool:
+    return 1 <= port <= 65535

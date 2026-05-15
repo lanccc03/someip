@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 
 from someip_gui_tool.adapters.base import (
     AdapterEvent,
@@ -20,13 +22,17 @@ from someip_gui_tool.domain.models import (
 @dataclass(frozen=True)
 class AdapterCall:
     name: str
-    details: dict[str, object]
+    details: Mapping[str, object]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "details", MappingProxyType(dict(self.details)))
 
 
 class MockSomeIpAdapter(SomeIpAdapter):
     def __init__(self) -> None:
         self.calls: list[AdapterCall] = []
         self._event_handlers: dict[tuple[int, int], list[EventHandler]] = {}
+        self._subscribed_eventgroups: set[tuple[int, int]] = set()
 
     async def start_service(self, service: ServiceDefinition) -> None:
         self.calls.append(AdapterCall("start_service", {"service_id": service.service_id_hex}))
@@ -79,6 +85,23 @@ class MockSomeIpAdapter(SomeIpAdapter):
         )
         self._event_handlers.setdefault((service.service_id, event.event_id), []).append(handler)
 
+    async def register_field_notifier_handler(
+        self,
+        service: ServiceDefinition,
+        field: FieldDefinition,
+        handler: EventHandler,
+    ) -> None:
+        if field.notifier is None:
+            raise ValueError(f"Field {field.name!r} has no notifier")
+        self.calls.append(
+            AdapterCall(
+                "register_field_notifier_handler",
+                {"service_id": service.service_id_hex, "field": field.name},
+            )
+        )
+        key = (service.service_id, field.notifier.element_id)
+        self._event_handlers.setdefault(key, []).append(handler)
+
     async def subscribe_eventgroup(self, service: ServiceDefinition, eventgroup_id: int) -> None:
         self.calls.append(
             AdapterCall(
@@ -86,6 +109,7 @@ class MockSomeIpAdapter(SomeIpAdapter):
                 {"service_id": service.service_id_hex, "eventgroup_id": f"0x{eventgroup_id:04X}"},
             )
         )
+        self._subscribed_eventgroups.add((service.service_id, eventgroup_id))
 
     async def unsubscribe_eventgroup(self, service: ServiceDefinition, eventgroup_id: int) -> None:
         self.calls.append(
@@ -94,6 +118,7 @@ class MockSomeIpAdapter(SomeIpAdapter):
                 {"service_id": service.service_id_hex, "eventgroup_id": f"0x{eventgroup_id:04X}"},
             )
         )
+        self._subscribed_eventgroups.discard((service.service_id, eventgroup_id))
 
     async def publish_event(
         self,
@@ -111,6 +136,8 @@ class MockSomeIpAdapter(SomeIpAdapter):
                 },
             )
         )
+        if not self._is_subscribed(service.service_id, event.eventgroup_id):
+            return
         adapter_event = AdapterEvent(
             service_id=service.service_id,
             element_id=event.event_id,
@@ -140,6 +167,26 @@ class MockSomeIpAdapter(SomeIpAdapter):
             payload=payload,
         )
 
+    async def field_set(
+        self,
+        service: ServiceDefinition,
+        field: FieldDefinition,
+        payload: bytes,
+    ) -> AdapterMethodResult:
+        self.calls.append(
+            AdapterCall(
+                "field_set",
+                {"service_id": service.service_id_hex, "field": field.name, "payload": payload.hex()},
+            )
+        )
+        if field.setter is None:
+            return AdapterMethodResult(status="error", detail=f"Field {field.name!r} has no setter")
+        return AdapterMethodResult(
+            status="success",
+            detail="mock field setter completed",
+            payload=payload,
+        )
+
     async def field_notify(
         self,
         service: ServiceDefinition,
@@ -154,6 +201,24 @@ class MockSomeIpAdapter(SomeIpAdapter):
                 {"service_id": service.service_id_hex, "field": field.name, "payload": payload.hex()},
             )
         )
+        if not self._is_subscribed(service.service_id, field.notifier.eventgroup_id):
+            return
+        adapter_event = AdapterEvent(
+            service_id=service.service_id,
+            element_id=field.notifier.element_id,
+            eventgroup_id=field.notifier.eventgroup_id,
+            payload=payload,
+        )
+        key = (service.service_id, field.notifier.element_id)
+        for handler in self._event_handlers.get(key, []):
+            handler(adapter_event)
 
     async def shutdown(self) -> None:
         self.calls.append(AdapterCall("shutdown", {}))
+        self._event_handlers.clear()
+        self._subscribed_eventgroups.clear()
+
+    def _is_subscribed(self, service_id: int, eventgroup_id: int | None) -> bool:
+        if eventgroup_id is None:
+            return False
+        return (service_id, eventgroup_id) in self._subscribed_eventgroups

@@ -66,6 +66,15 @@ class SomeIpAdapter(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    async def register_field_notifier_handler(
+        self,
+        service: ServiceDefinition,
+        field: FieldDefinition,
+        handler: EventHandler,
+    ) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
     async def subscribe_eventgroup(self, service: ServiceDefinition, eventgroup_id: int) -> None:
         raise NotImplementedError
 
@@ -84,6 +93,15 @@ class SomeIpAdapter(ABC):
 
     @abstractmethod
     async def field_get(
+        self,
+        service: ServiceDefinition,
+        field: FieldDefinition,
+        payload: bytes,
+    ) -> AdapterMethodResult:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def field_set(
         self,
         service: ServiceDefinition,
         field: FieldDefinition,

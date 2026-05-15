@@ -60,3 +60,66 @@ async def test_mock_adapter_marks_ff_method_as_limited(adc40_soc_dir):
 
     assert result.status == "limited"
     assert "fire-and-forget" in result.detail
+
+
+@pytest.mark.asyncio
+async def test_mock_adapter_delivers_field_notifier_events(adc40_soc_dir):
+    service = load_service_definition(adc40_soc_dir / "0x080C.json")
+    adapter = MockSomeIpAdapter()
+    received = []
+
+    field = service.fields[0]
+    assert field.notifier is not None
+    await adapter.register_field_notifier_handler(service, field, received.append)
+    await adapter.subscribe_eventgroup(service, field.notifier.eventgroup_id or 0)
+    await adapter.field_notify(service, field, b"\x05")
+
+    assert received == [
+        AdapterEvent(
+            service_id=service.service_id,
+            element_id=field.notifier.element_id,
+            eventgroup_id=field.notifier.eventgroup_id,
+            payload=b"\x05",
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_mock_adapter_stops_event_delivery_after_unsubscribe_and_shutdown(adc40_soc_dir):
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+    adapter = MockSomeIpAdapter()
+    received = []
+
+    event = service.events[0]
+    await adapter.register_event_handler(service, event, received.append)
+    await adapter.subscribe_eventgroup(service, event.eventgroup_id or 0)
+    await adapter.publish_event(service, event, b"\x01")
+    await adapter.unsubscribe_eventgroup(service, event.eventgroup_id or 0)
+    await adapter.publish_event(service, event, b"\x02")
+    await adapter.subscribe_eventgroup(service, event.eventgroup_id or 0)
+    await adapter.shutdown()
+    await adapter.publish_event(service, event, b"\x03")
+
+    assert [event.payload for event in received] == [b"\x01"]
+
+
+@pytest.mark.asyncio
+async def test_mock_adapter_field_set_returns_error_without_setter(adc40_soc_dir):
+    service = load_service_definition(adc40_soc_dir / "0x080C.json")
+    adapter = MockSomeIpAdapter()
+
+    result = await adapter.field_set(service, service.fields[0], b"\x06")
+
+    assert result.status == "error"
+    assert "setter" in result.detail
+
+
+@pytest.mark.asyncio
+async def test_mock_adapter_call_details_are_immutable(adc40_soc_dir):
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+    adapter = MockSomeIpAdapter()
+
+    await adapter.start_service(service)
+
+    with pytest.raises(TypeError):
+        adapter.calls[0].details["service_id"] = "0xFFFF"

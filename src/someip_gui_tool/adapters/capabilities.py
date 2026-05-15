@@ -14,7 +14,7 @@ class BackendCapabilityStatus(StrEnum):
 
 class BackendOperation(StrEnum):
     UDP_FF_METHOD = "udp-ff-method"
-    TCP_FF_METHOD = "tcp-ff-method"
+    TCP_FF_METHOD = "tcp-method"
     RR_METHOD = "rr-method"
     UDP_EVENT = "udp-event"
     TCP_EVENT = "tcp-event"

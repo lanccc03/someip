@@ -3,6 +3,7 @@ from someip_gui_tool.adapters.capabilities import (
     BackendCapabilityStatus,
     someipy_capability_report,
 )
+from someip_gui_tool.spike.scenarios import ScenarioKind
 
 
 EXPECTED_OPERATIONS = {
@@ -24,6 +25,14 @@ def test_someipy_report_covers_all_backend_operations_with_notes() -> None:
     assert set(report.operation_status) == EXPECTED_OPERATIONS
     assert set(report.notes) == EXPECTED_OPERATIONS
     assert all(note.strip() for note in report.notes.values())
+
+
+def test_someipy_report_uses_spike_operation_vocabulary() -> None:
+    assert BackendOperation.UDP_FF_METHOD == ScenarioKind.UDP_FF_METHOD
+    assert BackendOperation.TCP_FF_METHOD == ScenarioKind.TCP_METHOD
+    assert BackendOperation.UDP_EVENT == ScenarioKind.UDP_EVENT
+    assert BackendOperation.TCP_EVENT == ScenarioKind.TCP_EVENT
+    assert BackendOperation.FIELD_GETTER_NOTIFIER == ScenarioKind.FIELD_GETTER_NOTIFIER
 
 
 def test_someipy_report_mappings_are_immutable() -> None:

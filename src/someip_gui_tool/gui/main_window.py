@@ -41,6 +41,9 @@ class MainWindow(QMainWindow):
         self.service_tree.currentItemChanged.connect(self._on_current_item_changed)
 
         self.runtime_panel = RuntimePanel()
+        self.runtime_panel.role_combo.currentTextChanged.connect(
+            self._on_runtime_role_changed
+        )
         self.operation_panel = OperationPanel()
 
         self.details = QPlainTextEdit()
@@ -129,7 +132,7 @@ class MainWindow(QMainWindow):
         payload = current.data(0, ITEM_PAYLOAD_ROLE)
         service = self._service_for_item(current)
         if service is not None:
-            self.runtime_panel.set_config(infer_runtime_config(service, Role.CLIENT))
+            self._set_runtime_config(service)
 
         if isinstance(payload, MethodDefinition):
             self.operation_panel.show_method(payload)
@@ -137,6 +140,20 @@ class MainWindow(QMainWindow):
             self.operation_panel.show_event(payload)
         elif isinstance(payload, FieldDefinition):
             self.operation_panel.show_field(payload)
+        else:
+            self.operation_panel.clear_selection()
+
+    def _on_runtime_role_changed(self, role_text: str) -> None:
+        current = self.service_tree.currentItem()
+        if current is None:
+            return
+        service = self._service_for_item(current)
+        if service is not None:
+            self._set_runtime_config(service)
+
+    def _set_runtime_config(self, service: ServiceDefinition) -> None:
+        role = Role(self.runtime_panel.role_combo.currentText())
+        self.runtime_panel.set_config(infer_runtime_config(service, role))
 
     def _service_for_item(self, item: QTreeWidgetItem) -> ServiceDefinition | None:
         cursor: QTreeWidgetItem | None = item

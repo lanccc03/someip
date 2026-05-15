@@ -21,6 +21,11 @@ class OperationPanel(QGroupBox):
         layout.addWidget(self.primary_button)
         layout.addWidget(self.secondary_button)
 
+    def clear_selection(self) -> None:
+        self.title_label.setText("Select a method, event, or field")
+        self.primary_button.setText("Start")
+        self.secondary_button.setText("Stop")
+
     def show_method(self, method: MethodDefinition) -> None:
         self.title_label.setText(f"Method {method.name} ({method.method_id_hex})")
         self.primary_button.setText("Call")

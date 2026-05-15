@@ -1,5 +1,6 @@
 from PySide6.QtCore import Qt
 
+from someip_gui_tool.core.runtime_config import infer_runtime_config
 from someip_gui_tool.domain.enums import Role
 from someip_gui_tool.gui.main_window import MainWindow
 
@@ -76,3 +77,68 @@ def test_main_window_shows_field_operations(qtbot, adc40_soc_dir):
     assert window.operation_panel.title_label.text().startswith("Field")
     assert window.operation_panel.primary_button.text() == "Get"
     assert window.operation_panel.secondary_button.text() == "Notify"
+
+
+def test_main_window_role_change_reinfers_selected_service_config(
+    qtbot,
+    adc40_soc_dir,
+):
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    window.load_service_directory(adc40_soc_dir)
+    first_item = window.service_tree.topLevelItem(0)
+    service = first_item.data(0, Qt.ItemDataRole.UserRole)
+    expected_config = infer_runtime_config(service, Role.SERVER)
+
+    window.service_tree.setCurrentItem(first_item)
+    window.runtime_panel.role_combo.setCurrentText(Role.SERVER.value)
+
+    assert window.runtime_panel.role_combo.currentText() == Role.SERVER.value
+    assert window.runtime_panel.local_ip_edit.text() == expected_config.local_ip
+    assert window.runtime_panel.remote_ip_edit.text() == expected_config.remote_ip
+    assert window.runtime_panel.multicast_ip_edit.text() == expected_config.multicast_ip
+
+
+def test_main_window_clears_field_operations_when_service_selected(
+    qtbot,
+    adc40_soc_dir,
+):
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    window.load_service_directory(adc40_soc_dir)
+    field_item = window.service_tree.findItems(
+        "Field VertHeiRmdSts",
+        Qt.MatchFlag.MatchContains | Qt.MatchFlag.MatchRecursive,
+    )[0]
+    service_item = field_item.parent()
+
+    window.service_tree.setCurrentItem(field_item)
+    window.service_tree.setCurrentItem(service_item)
+
+    assert window.operation_panel.title_label.text() == "Select a method, event, or field"
+    assert window.operation_panel.primary_button.text() == "Start"
+    assert window.operation_panel.secondary_button.text() == "Stop"
+
+
+def test_main_window_clears_field_operations_when_field_part_selected(
+    qtbot,
+    adc40_soc_dir,
+):
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    window.load_service_directory(adc40_soc_dir)
+    field_item = window.service_tree.findItems(
+        "Field VertHeiRmdSts",
+        Qt.MatchFlag.MatchContains | Qt.MatchFlag.MatchRecursive,
+    )[0]
+    field_part_item = field_item.child(0)
+
+    window.service_tree.setCurrentItem(field_item)
+    window.service_tree.setCurrentItem(field_part_item)
+
+    assert window.operation_panel.title_label.text() == "Select a method, event, or field"
+    assert window.operation_panel.primary_button.text() == "Start"
+    assert window.operation_panel.secondary_button.text() == "Stop"

@@ -35,7 +35,7 @@ class RuntimeServiceConfig:
         object.__setattr__(
             self,
             "payload_defaults",
-            MappingProxyType(dict(self.payload_defaults)),
+            _freeze_payload_default(self.payload_defaults),
         )
 
 
@@ -157,3 +157,15 @@ def validate_runtime_config(
 
 def _is_valid_port(port: int) -> bool:
     return 1 <= port <= 65535
+
+
+def _freeze_payload_default(value: object) -> object:
+    if isinstance(value, Mapping):
+        return MappingProxyType(
+            {key: _freeze_payload_default(nested) for key, nested in value.items()}
+        )
+    if isinstance(value, list | tuple):
+        return tuple(_freeze_payload_default(nested) for nested in value)
+    if isinstance(value, set | frozenset):
+        return frozenset(_freeze_payload_default(nested) for nested in value)
+    return value

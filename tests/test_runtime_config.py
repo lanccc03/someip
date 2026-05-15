@@ -130,7 +130,11 @@ def test_validate_runtime_config_rejects_blank_ips_and_multicast(adc40_soc_dir) 
 
 def test_runtime_service_config_payload_defaults_are_immutable(adc40_soc_dir) -> None:
     service = load_service_definition(adc40_soc_dir / "0x080E.json")
-    defaults = {"counter": 1}
+    defaults = {
+        "counter": 1,
+        "sequence": [1, {"inner": "value"}],
+        "options": {"enabled": True, "flags": {"a", "b"}},
+    }
     config = RuntimeServiceConfig(
         service_id=service.service_id,
         instance_id=service.deployment.instance_id,
@@ -141,7 +145,20 @@ def test_runtime_service_config_payload_defaults_are_immutable(adc40_soc_dir) ->
     )
 
     defaults["counter"] = 2
+    defaults["sequence"].append(3)
+    defaults["sequence"][1]["inner"] = "changed"
+    defaults["options"]["enabled"] = False
+    defaults["options"]["flags"].add("c")
 
     assert config.payload_defaults["counter"] == 1
+    assert config.payload_defaults["sequence"] == (1, {"inner": "value"})
+    assert config.payload_defaults["options"]["enabled"] is True
+    assert config.payload_defaults["options"]["flags"] == frozenset({"a", "b"})
     with pytest.raises(TypeError):
         config.payload_defaults["counter"] = 3
+    with pytest.raises(AttributeError):
+        config.payload_defaults["sequence"].append(3)
+    with pytest.raises(TypeError):
+        config.payload_defaults["sequence"][1]["inner"] = "mutated"
+    with pytest.raises(TypeError):
+        config.payload_defaults["options"]["enabled"] = False

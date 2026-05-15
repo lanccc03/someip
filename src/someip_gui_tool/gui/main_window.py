@@ -25,6 +25,7 @@ from someip_gui_tool.domain.models import (
 )
 from someip_gui_tool.gui.operation_panel import OperationPanel
 from someip_gui_tool.gui.runtime_panel import RuntimePanel
+from someip_gui_tool.gui.theme import monospace_font
 
 
 ITEM_PAYLOAD_ROLE = Qt.ItemDataRole.UserRole
@@ -37,6 +38,7 @@ class MainWindow(QMainWindow):
         self._registry: ServiceRegistry | None = None
 
         self.service_tree = QTreeWidget()
+        self.service_tree.setObjectName("service_tree")
         self.service_tree.setHeaderLabels(["Service Browser"])
         self.service_tree.currentItemChanged.connect(self._on_current_item_changed)
 
@@ -51,15 +53,18 @@ class MainWindow(QMainWindow):
         self.details.setPlainText("Ready")
 
         self.bottom_tabs = QTabWidget()
+        self.bottom_tabs.setObjectName("bottom_tabs")
         self.run_log_view = QPlainTextEdit()
         self.message_trace_view = QPlainTextEdit()
         self.problems_view = QPlainTextEdit()
+        _mono = monospace_font()
         for view in (
             self.run_log_view,
             self.message_trace_view,
             self.problems_view,
         ):
             view.setReadOnly(True)
+            view.setFont(_mono)
 
         self.bottom_tabs.addTab(self.run_log_view, "Run Log")
         self.bottom_tabs.addTab(self.message_trace_view, "Message Trace")

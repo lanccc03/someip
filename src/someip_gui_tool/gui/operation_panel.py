@@ -12,8 +12,11 @@ from someip_gui_tool.domain.models import (
 class OperationPanel(QGroupBox):
     def __init__(self) -> None:
         super().__init__("Operation")
+        self.setObjectName("operation_panel")
         self.title_label = QLabel("Select a method, event, or field")
+        self.title_label.setObjectName("operation_title")
         self.primary_button = QPushButton("Start")
+        self.primary_button.setProperty("primary", True)
         self.secondary_button = QPushButton("Stop")
 
         layout = QVBoxLayout(self)

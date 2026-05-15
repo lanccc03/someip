@@ -9,6 +9,7 @@ from someip_gui_tool.domain.enums import Role
 class RuntimePanel(QGroupBox):
     def __init__(self) -> None:
         super().__init__("Runtime")
+        self.setObjectName("runtime_panel")
         self.role_combo = QComboBox()
         self.role_combo.addItems([Role.CLIENT.value, Role.SERVER.value])
         self.local_ip_edit = QLineEdit()

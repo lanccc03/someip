@@ -1,10 +1,48 @@
+from dataclasses import replace
+
 import pytest
 
+from someip_gui_tool.adapters.base import AdapterMethodResult
 from someip_gui_tool.adapters.mock import MockSomeIpAdapter
-from someip_gui_tool.core.runtime_config import infer_runtime_config
+from someip_gui_tool.core.runtime_config import RuntimeServiceConfig, infer_runtime_config
 from someip_gui_tool.core.runtime_session import RuntimeSession
 from someip_gui_tool.domain.enums import Role, TraceDirection
 from someip_gui_tool.parsing.service_json import load_service_definition
+
+
+class ResponsePayloadAdapter(MockSomeIpAdapter):
+    def __init__(
+        self,
+        method_payload: bytes | None = None,
+        field_payload: bytes | None = None,
+    ) -> None:
+        super().__init__()
+        self.method_payload = method_payload
+        self.field_payload = field_payload
+
+    async def call_method(self, service, method, payload):
+        await super().call_method(service, method, payload)
+        return AdapterMethodResult(
+            status="success",
+            detail="mock response payload",
+            payload=self.method_payload,
+        )
+
+    async def field_get(self, service, field, payload):
+        await super().field_get(service, field, payload)
+        return AdapterMethodResult(
+            status="success",
+            detail="mock field response payload",
+            payload=self.field_payload,
+        )
+
+
+def _valid_config(service, role=Role.CLIENT) -> RuntimeServiceConfig:
+    return replace(
+        infer_runtime_config(service, role),
+        server_port=30500,
+        client_port=30501,
+    )
 
 
 @pytest.mark.asyncio
@@ -12,7 +50,7 @@ async def test_runtime_session_subscribes_and_publishes_event(adc40_soc_dir):
     service = load_service_definition(adc40_soc_dir / "0x080E.json")
     adapter = MockSomeIpAdapter()
     session = RuntimeSession(adapter=adapter)
-    config = infer_runtime_config(service, Role.SERVER)
+    config = _valid_config(service, Role.SERVER)
 
     await session.start_service(service, config)
     await session.subscribe_event(service, service.events[0])
@@ -34,8 +72,25 @@ async def test_runtime_session_subscribes_and_publishes_event(adc40_soc_dir):
     ]
     assert session.trace[-1].raw_payload_hex == "4148000042c68000"
     assert session.trace[-1].element_name == "VehicleInfo"
-    assert session.trace[-1].local_endpoint == ""
-    assert session.trace[-1].remote_endpoint == ""
+    assert session.trace[-1].local_endpoint == f"{service.deployment.server_ip}:30500"
+    assert session.trace[-1].remote_endpoint == f"{service.deployment.client_ip}:30501"
+
+
+@pytest.mark.asyncio
+async def test_runtime_session_rejects_invalid_start_config_before_adapter(adc40_soc_dir):
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+    adapter = MockSomeIpAdapter()
+    session = RuntimeSession(adapter=adapter)
+
+    with pytest.raises(ValueError, match="server_port_missing"):
+        await session.start_service(service, infer_runtime_config(service, Role.SERVER))
+
+    assert adapter.calls == []
+    assert [entry.level for entry in session.run_log] == ["error", "error"]
+    assert [entry.error_detail for entry in session.run_log] == [
+        "server_port_missing",
+        "client_port_missing",
+    ]
 
 
 @pytest.mark.asyncio
@@ -52,8 +107,11 @@ async def test_runtime_session_field_get_and_notify(adc40_soc_dir):
     assert [call.name for call in adapter.calls] == ["field_get", "field_notify"]
     assert session.trace[0].element_type == "FieldGetter"
     assert session.trace[0].result == "success"
-    assert session.trace[1].element_type == "FieldNotifier"
+    assert session.trace[1].element_type == "FieldGetter"
+    assert session.trace[1].direction == TraceDirection.RX
     assert session.trace[1].result == "success"
+    assert session.trace[2].element_type == "FieldNotifier"
+    assert session.trace[2].result == "success"
 
 
 @pytest.mark.asyncio
@@ -72,6 +130,162 @@ async def test_runtime_session_reports_limited_ff_method(adc40_soc_dir):
 
 
 @pytest.mark.asyncio
+async def test_runtime_session_decodes_method_response_payload_rx_trace(adc40_soc_dir):
+    service = load_service_definition(adc40_soc_dir / "0x080D.json")
+    adapter = ResponsePayloadAdapter(method_payload=b"\x02")
+    session = RuntimeSession(adapter=adapter)
+    await session.start_service(service, _valid_config(service, Role.CLIENT))
+
+    result = await session.call_method(service, service.methods[0], {"SecondStartCtrlCmd": 1})
+
+    assert result.status == "success"
+    rx_trace = session.trace[-1]
+    assert rx_trace.direction == TraceDirection.RX
+    assert rx_trace.element_type == "Method"
+    assert rx_trace.raw_payload_hex == "02"
+    assert rx_trace.decoded_payload == {"SecondStartCtrlCmd": 2}
+    assert rx_trace.payload_decode_status == "ok"
+    assert rx_trace.local_endpoint == f"{service.deployment.client_ip}:30501"
+    assert rx_trace.remote_endpoint == f"{service.deployment.server_ip}:30500"
+
+
+@pytest.mark.asyncio
+async def test_runtime_session_records_method_response_decode_failure(adc40_soc_dir):
+    service = load_service_definition(adc40_soc_dir / "0x080D.json")
+    adapter = ResponsePayloadAdapter(method_payload=b"\x02\x03")
+    session = RuntimeSession(adapter=adapter)
+
+    result = await session.call_method(service, service.methods[0], {"SecondStartCtrlCmd": 1})
+
+    assert result.status == "success"
+    rx_trace = session.trace[-1]
+    assert rx_trace.direction == TraceDirection.RX
+    assert rx_trace.payload_decode_status == "error"
+    assert rx_trace.result == "error"
+    assert "trailing bytes" in rx_trace.error_message
+
+
+@pytest.mark.asyncio
+async def test_runtime_session_decodes_field_get_response_payload_rx_trace(adc40_soc_dir):
+    service = load_service_definition(adc40_soc_dir / "0x080C.json")
+    adapter = ResponsePayloadAdapter(field_payload=b"\x02")
+    session = RuntimeSession(adapter=adapter)
+    field = service.fields[0]
+
+    result = await session.field_get(service, field, {"VertHeiRmdSts": 1})
+
+    assert result.status == "success"
+    rx_trace = session.trace[-1]
+    assert rx_trace.direction == TraceDirection.RX
+    assert rx_trace.element_type == "FieldGetter"
+    assert rx_trace.raw_payload_hex == "02"
+    assert rx_trace.decoded_payload == {"VertHeiRmdSts": 2}
+    assert rx_trace.payload_decode_status == "ok"
+
+
+@pytest.mark.asyncio
+async def test_runtime_session_records_field_get_response_decode_failure(adc40_soc_dir):
+    service = load_service_definition(adc40_soc_dir / "0x080C.json")
+    adapter = ResponsePayloadAdapter(field_payload=b"\x02\x03")
+    session = RuntimeSession(adapter=adapter)
+    field = service.fields[0]
+
+    result = await session.field_get(service, field, {"VertHeiRmdSts": 1})
+
+    assert result.status == "success"
+    rx_trace = session.trace[-1]
+    assert rx_trace.direction == TraceDirection.RX
+    assert rx_trace.payload_decode_status == "error"
+    assert rx_trace.result == "error"
+    assert "trailing bytes" in rx_trace.error_message
+
+
+@pytest.mark.asyncio
+async def test_runtime_session_call_method_encode_error_is_logged_and_traced(adc40_soc_dir):
+    service = load_service_definition(adc40_soc_dir / "0x080D.json")
+    adapter = MockSomeIpAdapter()
+    session = RuntimeSession(adapter=adapter)
+
+    result = await session.call_method(service, service.methods[0], {})
+
+    assert result.status == "error"
+    assert adapter.calls == []
+    assert session.run_log[-1].level == "error"
+    assert "SecondStartCtrlCmd" in session.run_log[-1].error_detail
+    assert session.trace[-1].result == "error"
+    assert session.trace[-1].payload_decode_status == "encode-error"
+    assert session.trace[-1].raw_payload_hex == ""
+    assert session.trace[-1].decoded_payload == {}
+
+
+@pytest.mark.asyncio
+async def test_runtime_session_publish_event_encode_error_is_logged_and_traced(adc40_soc_dir):
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+    adapter = MockSomeIpAdapter()
+    session = RuntimeSession(adapter=adapter)
+
+    with pytest.raises(KeyError):
+        await session.publish_event(service, service.events[0], {})
+
+    assert adapter.calls == []
+    assert session.run_log[-1].level == "error"
+    assert "VehicleInfo" in session.run_log[-1].error_detail
+    assert session.trace[-1].element_type == "Event"
+    assert session.trace[-1].payload_decode_status == "encode-error"
+
+
+@pytest.mark.asyncio
+async def test_runtime_session_field_get_encode_error_is_logged_and_traced(adc40_soc_dir):
+    service = load_service_definition(adc40_soc_dir / "0x080C.json")
+    adapter = MockSomeIpAdapter()
+    session = RuntimeSession(adapter=adapter)
+    field = service.fields[0]
+
+    result = await session.field_get(service, field, {})
+
+    assert result.status == "error"
+    assert adapter.calls == []
+    assert session.run_log[-1].level == "error"
+    assert "VertHeiRmdSts" in session.run_log[-1].error_detail
+    assert session.trace[-1].element_type == "FieldGetter"
+    assert session.trace[-1].payload_decode_status == "encode-error"
+
+
+@pytest.mark.asyncio
+async def test_runtime_session_field_set_encode_error_is_logged_and_traced(adc40_soc_dir):
+    service = load_service_definition(adc40_soc_dir / "0x080C.json")
+    adapter = MockSomeIpAdapter()
+    session = RuntimeSession(adapter=adapter)
+    field = replace(service.fields[0], setter=service.fields[0].getter)
+
+    result = await session.field_set(service, field, {})
+
+    assert result.status == "error"
+    assert adapter.calls == []
+    assert session.run_log[-1].level == "error"
+    assert "VertHeiRmdSts" in session.run_log[-1].error_detail
+    assert session.trace[-1].element_type == "FieldSetter"
+    assert session.trace[-1].payload_decode_status == "encode-error"
+
+
+@pytest.mark.asyncio
+async def test_runtime_session_field_notify_encode_error_is_logged_and_traced(adc40_soc_dir):
+    service = load_service_definition(adc40_soc_dir / "0x080C.json")
+    adapter = MockSomeIpAdapter()
+    session = RuntimeSession(adapter=adapter)
+    field = service.fields[0]
+
+    with pytest.raises(KeyError):
+        await session.field_notify(service, field, {})
+
+    assert adapter.calls == []
+    assert session.run_log[-1].level == "error"
+    assert "VertHeiRmdSts" in session.run_log[-1].error_detail
+    assert session.trace[-1].element_type == "FieldNotifier"
+    assert session.trace[-1].payload_decode_status == "encode-error"
+
+
+@pytest.mark.asyncio
 async def test_runtime_session_field_set_without_setter_returns_error(adc40_soc_dir):
     service = load_service_definition(adc40_soc_dir / "0x080C.json")
     adapter = MockSomeIpAdapter()
@@ -82,9 +296,9 @@ async def test_runtime_session_field_set_without_setter_returns_error(adc40_soc_
 
     assert result.status == "error"
     assert "setter" in result.detail
-    assert adapter.calls[-1].name == "field_set"
-    assert adapter.calls[-1].details["payload"] == ""
+    assert adapter.calls == []
     assert session.trace[-1].element_type == "FieldSetter"
+    assert session.trace[-1].element_id == "missing"
     assert session.trace[-1].raw_payload_hex == ""
     assert session.trace[-1].result == "error"
 
@@ -100,12 +314,14 @@ async def test_runtime_session_registers_rx_traces_after_subscription(adc40_soc_
     assert field.notifier is not None
 
     await session.register_event_trace(event_service, event)
+    await session.register_event_trace(event_service, event)
     await session.subscribe_event(event_service, event)
     await session.publish_event(
         event_service,
         event,
         {"VehicleInfo": {"VehicleSpeed": 12.5, "Odometer": 99.25}},
     )
+    await session.register_field_notifier_trace(field_service, field)
     await session.register_field_notifier_trace(field_service, field)
     await adapter.subscribe_eventgroup(field_service, field.notifier.eventgroup_id or 0)
     await session.field_notify(field_service, field, {"VertHeiRmdSts": 1})
@@ -116,3 +332,5 @@ async def test_runtime_session_registers_rx_traces_after_subscription(adc40_soc_
     assert rx_entries[0].payload_decode_status == "ok"
     assert rx_entries[1].raw_payload_hex == "01"
     assert rx_entries[1].payload_decode_status == "ok"
+    assert [call.name for call in adapter.calls].count("register_event_handler") == 1
+    assert [call.name for call in adapter.calls].count("register_field_notifier_handler") == 1

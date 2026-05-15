@@ -5,7 +5,7 @@ from typing import Any
 
 from someip_gui_tool.adapters.base import AdapterEvent, AdapterMethodResult, SomeIpAdapter
 from someip_gui_tool.codec.payload_codec import PayloadCodec
-from someip_gui_tool.core.runtime_config import RuntimeServiceConfig
+from someip_gui_tool.core.runtime_config import RuntimeServiceConfig, validate_runtime_config
 from someip_gui_tool.domain.enums import Role, TraceDirection, TransportProtocol
 from someip_gui_tool.domain.models import (
     EventDefinition,
@@ -23,13 +23,29 @@ class RuntimeSession:
         self.codec = codec or PayloadCodec()
         self.run_log: list[RunLogEntry] = []
         self.trace: list[MessageTraceEntry] = []
+        self._configs: dict[int, RuntimeServiceConfig] = {}
+        self._registered_trace_keys: set[tuple[str, int, int]] = set()
 
     async def start_service(
         self,
         service: ServiceDefinition,
         config: RuntimeServiceConfig,
     ) -> None:
+        problems = validate_runtime_config(service, config)
+        for problem in problems:
+            self._log(
+                problem.severity,
+                "Core",
+                problem.message,
+                service_id=service.service_id_hex,
+                error_detail=problem.code,
+            )
+        errors = [problem for problem in problems if problem.severity == "error"]
+        if errors:
+            problem_codes = ", ".join(problem.code for problem in errors)
+            raise ValueError(f"Runtime config invalid: {problem_codes}")
         await self.adapter.start_service(service)
+        self._configs[service.service_id] = config
         self._log(
             "info",
             "Core",
@@ -52,7 +68,21 @@ class RuntimeSession:
         method: MethodDefinition,
         values: dict[str, Any],
     ) -> AdapterMethodResult:
-        payload = self.codec.encode_parameters(method.parameters, values)
+        try:
+            payload = self.codec.encode_parameters(method.parameters, values)
+        except (KeyError, TypeError, ValueError) as exc:
+            return self._record_encode_error_result(
+                service=service,
+                role=Role.CLIENT,
+                direction=TraceDirection.TX,
+                element_type="Method",
+                element_name=method.name,
+                element_id=method.method_id_hex,
+                eventgroup_id=None,
+                transport=method.transport,
+                rr_ff=method.rr_ff,
+                error=exc,
+            )
         result = await self.adapter.call_method(service, method, payload)
         self._trace(
             service=service,
@@ -69,6 +99,20 @@ class RuntimeSession:
             result=result.status,
             error_message=_error_detail(result),
         )
+        if result.payload is not None:
+            self._trace_response_payload(
+                service=service,
+                role=Role.CLIENT,
+                element_type="Method",
+                element_name=method.name,
+                element_id=method.method_id_hex,
+                eventgroup_id=None,
+                transport=method.transport,
+                parameters=method.parameters,
+                payload=result.payload,
+                result_status=result.status,
+                rr_ff=method.rr_ff,
+            )
         self._log(
             "info",
             "Core",
@@ -97,7 +141,22 @@ class RuntimeSession:
         event: EventDefinition,
         values: dict[str, Any],
     ) -> None:
-        payload = self.codec.encode_parameters(event.parameters, values)
+        try:
+            payload = self.codec.encode_parameters(event.parameters, values)
+        except (KeyError, TypeError, ValueError) as exc:
+            self._record_encode_error_trace(
+                service=service,
+                role=Role.SERVER,
+                direction=TraceDirection.TX,
+                element_type="Event",
+                element_name=event.name,
+                element_id=event.event_id_hex,
+                eventgroup_id=_eventgroup_hex(event.eventgroup_id),
+                transport=event.transport,
+                rr_ff=None,
+                error=exc,
+            )
+            raise
         await self.adapter.publish_event(service, event, payload)
         self._trace(
             service=service,
@@ -130,7 +189,21 @@ class RuntimeSession:
     ) -> AdapterMethodResult:
         if field.getter is None:
             raise ValueError(f"Field {field.name!r} has no getter")
-        payload = self.codec.encode_parameters(field.getter.parameters, values)
+        try:
+            payload = self.codec.encode_parameters(field.getter.parameters, values)
+        except (KeyError, TypeError, ValueError) as exc:
+            return self._record_encode_error_result(
+                service=service,
+                role=Role.CLIENT,
+                direction=TraceDirection.TX,
+                element_type="FieldGetter",
+                element_name=field.name,
+                element_id=_field_part_id_hex(field.getter),
+                eventgroup_id=_eventgroup_hex(field.getter.eventgroup_id),
+                transport=field.getter.transport,
+                rr_ff=None,
+                error=exc,
+            )
         result = await self.adapter.field_get(service, field, payload)
         self._trace_field_part(
             service=service,
@@ -144,6 +217,20 @@ class RuntimeSession:
             result=result.status,
             error_message=_error_detail(result),
         )
+        if result.payload is not None:
+            self._trace_response_payload(
+                service=service,
+                role=Role.CLIENT,
+                element_type="FieldGetter",
+                element_name=field.name,
+                element_id=_field_part_id_hex(field.getter),
+                eventgroup_id=_eventgroup_hex(field.getter.eventgroup_id),
+                transport=field.getter.transport,
+                parameters=field.getter.parameters,
+                payload=result.payload,
+                result_status=result.status,
+                rr_ff=None,
+            )
         self._log(
             "info",
             "Core",
@@ -160,11 +247,47 @@ class RuntimeSession:
         field: FieldDefinition,
         values: dict[str, Any],
     ) -> AdapterMethodResult:
-        payload = (
-            self.codec.encode_parameters(field.setter.parameters, values)
-            if field.setter is not None
-            else b""
-        )
+        if field.setter is None:
+            detail = f"Field {field.name!r} has no setter"
+            self._trace(
+                service=service,
+                role=Role.CLIENT,
+                direction=TraceDirection.TX,
+                element_type="FieldSetter",
+                element_name=field.name,
+                element_id="missing",
+                eventgroup_id=None,
+                transport=service.deployment.default_transport,
+                raw_payload_hex="",
+                decoded_payload={},
+                rr_ff=None,
+                result="error",
+                error_message=detail,
+            )
+            self._log(
+                "error",
+                "Core",
+                f"Field setter {field.name} result=error",
+                service_id=service.service_id_hex,
+                element_id="missing",
+                error_detail=detail,
+            )
+            return AdapterMethodResult(status="error", detail=detail)
+        try:
+            payload = self.codec.encode_parameters(field.setter.parameters, values)
+        except (KeyError, TypeError, ValueError) as exc:
+            return self._record_encode_error_result(
+                service=service,
+                role=Role.CLIENT,
+                direction=TraceDirection.TX,
+                element_type="FieldSetter",
+                element_name=field.name,
+                element_id=_field_part_id_hex(field.setter),
+                eventgroup_id=_eventgroup_hex(field.setter.eventgroup_id),
+                transport=field.setter.transport,
+                rr_ff=None,
+                error=exc,
+            )
         result = await self.adapter.field_set(service, field, payload)
         self._trace(
             service=service,
@@ -199,7 +322,22 @@ class RuntimeSession:
     ) -> None:
         if field.notifier is None:
             raise ValueError(f"Field {field.name!r} has no notifier")
-        payload = self.codec.encode_parameters(field.notifier.parameters, values)
+        try:
+            payload = self.codec.encode_parameters(field.notifier.parameters, values)
+        except (KeyError, TypeError, ValueError) as exc:
+            self._record_encode_error_trace(
+                service=service,
+                role=Role.SERVER,
+                direction=TraceDirection.TX,
+                element_type="FieldNotifier",
+                element_name=field.name,
+                element_id=_field_part_id_hex(field.notifier),
+                eventgroup_id=_eventgroup_hex(field.notifier.eventgroup_id),
+                transport=field.notifier.transport,
+                rr_ff=None,
+                error=exc,
+            )
+            raise
         await self.adapter.field_notify(service, field, payload)
         self._trace_field_part(
             service=service,
@@ -226,11 +364,15 @@ class RuntimeSession:
         service: ServiceDefinition,
         event: EventDefinition,
     ) -> None:
+        key = ("event", service.service_id, event.event_id)
+        if key in self._registered_trace_keys:
+            return
         await self.adapter.register_event_handler(
             service,
             event,
             lambda adapter_event: self._append_event_rx_trace(service, event, adapter_event),
         )
+        self._registered_trace_keys.add(key)
 
     async def register_field_notifier_trace(
         self,
@@ -239,6 +381,9 @@ class RuntimeSession:
     ) -> None:
         if field.notifier is None:
             raise ValueError(f"Field {field.name!r} has no notifier")
+        key = ("field-notifier", service.service_id, field.notifier.element_id)
+        if key in self._registered_trace_keys:
+            return
         await self.adapter.register_field_notifier_handler(
             service,
             field,
@@ -248,6 +393,7 @@ class RuntimeSession:
                 adapter_event,
             ),
         )
+        self._registered_trace_keys.add(key)
 
     def _append_event_rx_trace(
         self,
@@ -312,8 +458,113 @@ class RuntimeSession:
     ) -> tuple[dict[str, Any], str, str | None]:
         try:
             return self.codec.decode_parameters(parameters, payload), "ok", None
-        except ValueError as exc:
+        except (KeyError, TypeError, ValueError) as exc:
             return {}, "error", str(exc)
+
+    def _trace_response_payload(
+        self,
+        *,
+        service: ServiceDefinition,
+        role: Role,
+        element_type: str,
+        element_name: str,
+        element_id: str,
+        eventgroup_id: str | None,
+        transport: TransportProtocol,
+        parameters: list[Any],
+        payload: bytes,
+        result_status: str,
+        rr_ff: str | None,
+    ) -> None:
+        decoded_payload, payload_decode_status, error_message = self._decode_payload(
+            parameters,
+            payload,
+        )
+        self._trace(
+            service=service,
+            role=role,
+            direction=TraceDirection.RX,
+            element_type=element_type,
+            element_name=element_name,
+            element_id=element_id,
+            eventgroup_id=eventgroup_id,
+            transport=transport,
+            raw_payload_hex=payload.hex(),
+            decoded_payload=decoded_payload,
+            rr_ff=rr_ff,
+            result=result_status if payload_decode_status == "ok" else "error",
+            error_message=error_message,
+            payload_decode_status=payload_decode_status,
+        )
+
+    def _record_encode_error_result(
+        self,
+        *,
+        service: ServiceDefinition,
+        role: Role,
+        direction: TraceDirection,
+        element_type: str,
+        element_name: str,
+        element_id: str,
+        eventgroup_id: str | None,
+        transport: TransportProtocol,
+        rr_ff: str | None,
+        error: Exception,
+    ) -> AdapterMethodResult:
+        detail = str(error)
+        self._record_encode_error_trace(
+            service=service,
+            role=role,
+            direction=direction,
+            element_type=element_type,
+            element_name=element_name,
+            element_id=element_id,
+            eventgroup_id=eventgroup_id,
+            transport=transport,
+            rr_ff=rr_ff,
+            error=error,
+        )
+        return AdapterMethodResult(status="error", detail=detail)
+
+    def _record_encode_error_trace(
+        self,
+        *,
+        service: ServiceDefinition,
+        role: Role,
+        direction: TraceDirection,
+        element_type: str,
+        element_name: str,
+        element_id: str,
+        eventgroup_id: str | None,
+        transport: TransportProtocol,
+        rr_ff: str | None,
+        error: Exception,
+    ) -> None:
+        detail = str(error)
+        self._trace(
+            service=service,
+            role=role,
+            direction=direction,
+            element_type=element_type,
+            element_name=element_name,
+            element_id=element_id,
+            eventgroup_id=eventgroup_id,
+            transport=transport,
+            raw_payload_hex="",
+            decoded_payload={},
+            rr_ff=rr_ff,
+            result="error",
+            error_message=detail,
+            payload_decode_status="encode-error",
+        )
+        self._log(
+            "error",
+            "Core",
+            f"{element_type} {element_name} encode failed",
+            service_id=service.service_id_hex,
+            element_id=element_id,
+            error_detail=detail,
+        )
 
     def _trace_field_part(
         self,
@@ -385,6 +636,7 @@ class RuntimeSession:
         error_message: str | None,
         payload_decode_status: str = "ok",
     ) -> None:
+        local_endpoint, remote_endpoint = self._trace_endpoints(service)
         self.trace.append(
             MessageTraceEntry(
                 timestamp=datetime.now(timezone.utc),
@@ -398,8 +650,8 @@ class RuntimeSession:
                 element_id=element_id,
                 eventgroup_id=eventgroup_id,
                 transport=transport,
-                local_endpoint="",
-                remote_endpoint="",
+                local_endpoint=local_endpoint,
+                remote_endpoint=remote_endpoint,
                 rr_ff=rr_ff,
                 raw_payload_hex=raw_payload_hex,
                 decoded_payload=decoded_payload,
@@ -407,6 +659,22 @@ class RuntimeSession:
                 result=result,
                 error_message=error_message,
             )
+        )
+
+    def _trace_endpoints(self, service: ServiceDefinition) -> tuple[str, str]:
+        config = self._configs.get(service.service_id)
+        if config is None:
+            return "", ""
+        role = Role(config.role)
+        if role is Role.SERVER:
+            local_port = config.server_port
+            remote_port = config.client_port
+        else:
+            local_port = config.client_port
+            remote_port = config.server_port
+        return _format_endpoint(config.local_ip, local_port), _format_endpoint(
+            config.remote_ip,
+            remote_port,
         )
 
 
@@ -418,7 +686,7 @@ def _eventgroup_hex(eventgroup_id: int | None) -> str | None:
 
 def _field_part_id_hex(part: FieldPartDefinition | None) -> str:
     if part is None:
-        return "0x0000"
+        return "missing"
     return f"0x{part.element_id:04X}"
 
 
@@ -435,3 +703,9 @@ def _error_detail(result: AdapterMethodResult) -> str | None:
     if result.status == "success":
         return None
     return result.detail
+
+
+def _format_endpoint(ip_address: str, port: int | None) -> str:
+    if not ip_address or port is None:
+        return ""
+    return f"{ip_address}:{port}"

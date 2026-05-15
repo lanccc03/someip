@@ -4,10 +4,10 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QHBoxLayout,
     QMainWindow,
     QPlainTextEdit,
     QSplitter,
+    QTabWidget,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -50,6 +50,21 @@ class MainWindow(QMainWindow):
         self.details.setReadOnly(True)
         self.details.setPlainText("Ready")
 
+        self.bottom_tabs = QTabWidget()
+        self.run_log_view = QPlainTextEdit()
+        self.message_trace_view = QPlainTextEdit()
+        self.problems_view = QPlainTextEdit()
+        for view in (
+            self.run_log_view,
+            self.message_trace_view,
+            self.problems_view,
+        ):
+            view.setReadOnly(True)
+
+        self.bottom_tabs.addTab(self.run_log_view, "Run Log")
+        self.bottom_tabs.addTab(self.message_trace_view, "Message Trace")
+        self.bottom_tabs.addTab(self.problems_view, "Problems")
+
         right_side = QWidget()
         right_layout = QVBoxLayout(right_side)
         right_layout.addWidget(self.runtime_panel)
@@ -63,8 +78,11 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(1, 3)
 
         central_widget = QWidget()
-        layout = QHBoxLayout(central_widget)
+        layout = QVBoxLayout(central_widget)
         layout.addWidget(splitter)
+        layout.addWidget(self.bottom_tabs)
+        layout.setStretch(0, 4)
+        layout.setStretch(1, 1)
         self.setCentralWidget(central_widget)
         self.statusBar().showMessage("Ready")
 

@@ -47,6 +47,29 @@ def test_main_window_loads_services(qtbot, adc40_soc_dir):
     )
 
 
+def test_main_window_exposes_bottom_runtime_tabs(qtbot, adc40_soc_dir):
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    window.load_service_directory(adc40_soc_dir)
+    window.show()
+
+    assert window.bottom_tabs.count() == 3
+    assert [
+        window.bottom_tabs.tabText(index)
+        for index in range(window.bottom_tabs.count())
+    ] == ["Run Log", "Message Trace", "Problems"]
+    assert window.run_log_view.isReadOnly()
+    assert window.message_trace_view.isReadOnly()
+    assert window.problems_view.isReadOnly()
+
+    for index in range(window.bottom_tabs.count()):
+        window.bottom_tabs.setCurrentIndex(index)
+        assert window.bottom_tabs.currentWidget().isVisible()
+
+    assert window.service_tree.topLevelItemCount() >= 5
+
+
 def test_main_window_shows_runtime_config_for_selected_service(qtbot, adc40_soc_dir):
     window = MainWindow()
     qtbot.addWidget(window)

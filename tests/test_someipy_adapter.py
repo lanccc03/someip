@@ -96,16 +96,17 @@ async def test_someipy_adapter_field_set_returns_error_without_setter(adc40_soc_
 
 
 @pytest.mark.asyncio
-async def test_someipy_adapter_field_get_returns_unimplemented_error_with_getter(adc40_soc_dir) -> None:
+async def test_someipy_adapter_field_get_calls_getter_method_and_returns_payload(adc40_soc_dir) -> None:
     api = FakeSomeipyApi()
-    adapter = SomeipyAdapter(api=api, local_ip="127.0.0.1", base_port=30500)
+    adapter = SomeipyAdapter(api=api, local_ip="127.0.0.1", base_port=31000)
     service = load_service_definition(adc40_soc_dir / "0x080C.json")
+    field = service.fields[0]
 
-    result = await adapter.field_get(service, service.fields[0], b"\x07")
+    result = await adapter.field_get(service, field, b"\x07")
 
-    assert result.status == "error"
-    assert "not implemented in Phase A adapter skeleton" in result.detail
-    assert result.payload is None
+    assert result.status == "success"
+    assert result.detail == "someipy field getter completed"
+    assert result.payload == b"\x07"
     assert api.connect_started_count == 1
 
 
@@ -125,18 +126,39 @@ async def test_someipy_adapter_field_set_returns_unimplemented_error_with_setter
 
 
 @pytest.mark.asyncio
-async def test_someipy_adapter_protocol_actions_raise_not_implemented(adc40_soc_dir) -> None:
+async def test_someipy_adapter_field_notify_sends_notifier_event(adc40_soc_dir) -> None:
     api = FakeSomeipyApi()
-    adapter = SomeipyAdapter(api=api, local_ip="127.0.0.1", base_port=30500)
-    event_service = load_service_definition(adc40_soc_dir / "0x080E.json")
-    field_service = load_service_definition(adc40_soc_dir / "0x080C.json")
-    event = event_service.events[0]
-    field = field_service.fields[0]
+    adapter = SomeipyAdapter(api=api, local_ip="127.0.0.1", base_port=31000)
+    service = load_service_definition(adc40_soc_dir / "0x080C.json")
+    field = service.fields[0]
+    assert field.notifier is not None
 
-    with pytest.raises(NotImplementedError, match="field_notify.*Phase A adapter skeleton"):
-        await adapter.field_notify(field_service, field, b"\x02")
+    await adapter.field_notify(service, field, b"\x09")
 
-    assert api.connect_started_count == 1
+    assert api.servers[0].sent_events == [
+        (field.notifier.eventgroup_id, field.notifier.element_id, b"\x09")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_someipy_adapter_dispatches_field_notifier_to_registered_handlers(adc40_soc_dir) -> None:
+    api = FakeSomeipyApi()
+    adapter = SomeipyAdapter(api=api, local_ip="127.0.0.1", base_port=31000)
+    service = load_service_definition(adc40_soc_dir / "0x080C.json")
+    field = service.fields[0]
+    assert field.notifier is not None
+    assert field.notifier.eventgroup_id is not None
+    received = []
+
+    await adapter.register_field_notifier_handler(service, field, received.append)
+    await adapter.subscribe_eventgroup(service, field.notifier.eventgroup_id)
+    await adapter.field_notify(service, field, b"\x01")
+
+    assert len(received) == 1
+    assert received[0].service_id == service.service_id
+    assert received[0].element_id == field.notifier.element_id
+    assert received[0].eventgroup_id == field.notifier.eventgroup_id
+    assert received[0].payload == b"\x01"
 
 
 @pytest.mark.asyncio

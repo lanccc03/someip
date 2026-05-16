@@ -24,9 +24,6 @@ from someip_gui_tool.domain.models import (
 )
 
 
-FIELD_GET_NOT_IMPLEMENTED = (
-    "someipy field getter execution is not implemented in Phase A adapter skeleton"
-)
 FIELD_SET_NOT_IMPLEMENTED = (
     "someipy field setter execution is not implemented in Phase A adapter skeleton"
 )
@@ -96,13 +93,9 @@ class SomeipyAdapter(SomeIpAdapter):
     ) -> AdapterMethodResult:
         if method.rr_ff == "FF":
             return AdapterMethodResult(status="limited", detail=SOMEIPY_FF_LIMITATION)
-        return AdapterMethodResult(
-            status="error",
-            detail=(
-                "RR method execution is not enabled until a matching RR fixture "
-                "or adapter request/response path is available."
-            ),
-        )
+        runtime = await self._runtime_for_service(service)
+        result = await _maybe_await(runtime.client.call_method(method.method_id, payload))
+        return self._adapter_method_result(result, "someipy method call completed")
 
     async def register_event_handler(
         self,
@@ -159,8 +152,9 @@ class SomeipyAdapter(SomeIpAdapter):
     ) -> AdapterMethodResult:
         if field.getter is None:
             return AdapterMethodResult(status="error", detail=f"Field {field.name!r} has no getter")
-        await self._ensure_daemon()
-        return AdapterMethodResult(status="error", detail=FIELD_GET_NOT_IMPLEMENTED)
+        runtime = await self._runtime_for_service(service)
+        result = await _maybe_await(runtime.client.call_method(field.getter.element_id, payload))
+        return self._adapter_method_result(result, "someipy field getter completed")
 
     async def field_set(
         self,
@@ -181,10 +175,33 @@ class SomeipyAdapter(SomeIpAdapter):
     ) -> None:
         if field.notifier is None:
             raise ValueError(f"Field {field.name!r} has no notifier")
-        await self._ensure_daemon()
-        raise NotImplementedError(
-            "someipy field_notify execution is not implemented in Phase A adapter skeleton"
+        if field.notifier.eventgroup_id is None:
+            raise ValueError(f"Field {field.name!r} notifier has no eventgroup id")
+        runtime = await self._runtime_for_service(service)
+        await _maybe_await(
+            runtime.server.send_event(
+                field.notifier.eventgroup_id,
+                field.notifier.element_id,
+                payload,
+            )
         )
+
+    def _adapter_method_result(self, result: Any, success_detail: str) -> AdapterMethodResult:
+        payload = getattr(result, "payload", None)
+        return_code = getattr(result, "return_code", None)
+        return_code_name = getattr(return_code, "name", None) or str(return_code)
+        if return_code_name not in {"E_OK", "ReturnCode.E_OK"}:
+            return AdapterMethodResult(
+                status="error",
+                detail=f"someipy method returned {return_code_name}",
+                payload=payload if isinstance(payload, bytes) else None,
+            )
+        if payload is not None and not isinstance(payload, bytes):
+            return AdapterMethodResult(
+                status="error",
+                detail=f"someipy method payload must be bytes, got {type(payload).__name__}",
+            )
+        return AdapterMethodResult(status="success", detail=success_detail, payload=payload)
 
     async def shutdown(self) -> None:
         async with self._daemon_lock:

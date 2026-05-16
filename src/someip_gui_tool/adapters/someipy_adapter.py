@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from someip_gui_tool.adapters.base import (
+    AdapterEvent,
     AdapterMethodResult,
     EventHandler,
     SomeIpAdapter,
@@ -145,10 +146,10 @@ class SomeipyAdapter(SomeIpAdapter):
         event: EventDefinition,
         payload: bytes,
     ) -> None:
-        await self._ensure_daemon()
-        raise NotImplementedError(
-            "someipy publish_event execution is not implemented in Phase A adapter skeleton"
-        )
+        if event.eventgroup_id is None:
+            raise ValueError(f"Event {event.name!r} has no eventgroup id")
+        runtime = await self._runtime_for_service(service)
+        await _maybe_await(runtime.server.send_event(event.eventgroup_id, event.event_id, payload))
 
     async def field_get(
         self,
@@ -230,7 +231,29 @@ class SomeipyAdapter(SomeIpAdapter):
         event_id: int,
         payload: bytes,
     ) -> None:
-        pass  # implemented in Task 4
+        eventgroup_id = self._eventgroup_id_for_element(service, event_id)
+        adapter_event = AdapterEvent(
+            service_id=service.service_id,
+            element_id=event_id,
+            eventgroup_id=eventgroup_id,
+            payload=payload,
+        )
+        for handler in list(self._event_handlers.get((service.service_id, event_id), [])):
+            handler(adapter_event)
+
+    def _eventgroup_id_for_element(
+        self,
+        service: ServiceDefinition,
+        element_id: int,
+    ) -> int | None:
+        for event in service.events:
+            if event.event_id == element_id:
+                return event.eventgroup_id
+        for field in service.fields:
+            notifier = field.notifier
+            if notifier is not None and notifier.element_id == element_id:
+                return notifier.eventgroup_id
+        return None
 
     def _method_handler_factory(self, api: Any) -> Any:
         def handler_factory(service: ServiceDefinition, method_part: Any) -> Any:

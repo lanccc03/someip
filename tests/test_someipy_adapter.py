@@ -133,12 +133,45 @@ async def test_someipy_adapter_protocol_actions_raise_not_implemented(adc40_soc_
     event = event_service.events[0]
     field = field_service.fields[0]
 
-    with pytest.raises(NotImplementedError, match="publish_event.*Phase A adapter skeleton"):
-        await adapter.publish_event(event_service, event, b"\x01")
     with pytest.raises(NotImplementedError, match="field_notify.*Phase A adapter skeleton"):
         await adapter.field_notify(field_service, field, b"\x02")
 
     assert api.connect_started_count == 1
+
+
+@pytest.mark.asyncio
+async def test_someipy_adapter_publish_event_sends_payload(adc40_soc_dir) -> None:
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+    event = service.events[0]
+    assert event.eventgroup_id is not None
+    api = FakeSomeipyApi()
+    adapter = SomeipyAdapter(api=api, local_ip="127.0.0.1", base_port=31000)
+
+    await adapter.publish_event(service, event, b"\x41\x48\x00\x00\x42\xc6\x80\x00")
+
+    assert api.servers[0].sent_events == [
+        (event.eventgroup_id, event.event_id, b"\x41\x48\x00\x00\x42\xc6\x80\x00")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_someipy_adapter_dispatches_received_event_to_registered_handlers(adc40_soc_dir) -> None:
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+    event = service.events[0]
+    assert event.eventgroup_id is not None
+    api = FakeSomeipyApi()
+    adapter = SomeipyAdapter(api=api, local_ip="127.0.0.1", base_port=31000)
+    received = []
+
+    await adapter.register_event_handler(service, event, received.append)
+    await adapter.subscribe_eventgroup(service, event.eventgroup_id)
+    await adapter.publish_event(service, event, b"\x01\x02\x03\x04")
+
+    assert len(received) == 1
+    assert received[0].service_id == service.service_id
+    assert received[0].element_id == event.event_id
+    assert received[0].eventgroup_id == event.eventgroup_id
+    assert received[0].payload == b"\x01\x02\x03\x04"
 
 
 @pytest.mark.asyncio

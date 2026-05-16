@@ -67,15 +67,15 @@ async def test_someipy_adapter_reports_ff_method_limited(adc40_soc_dir) -> None:
 
 
 @pytest.mark.asyncio
-async def test_someipy_adapter_find_service_returns_false_after_connecting(adc40_soc_dir) -> None:
-    api = FakeSomeipyApi()
-    adapter = SomeipyAdapter(api=api, local_ip="127.0.0.1", base_port=30500)
+async def test_someipy_adapter_find_service_polls_client_availability(adc40_soc_dir) -> None:
     service = load_service_definition(adc40_soc_dir / "0x080E.json")
+    api = FakeSomeipyApi(availability_sequences={service.service_id: [False, True]})
+    adapter = SomeipyAdapter(api=api, local_ip="127.0.0.1", base_port=31000)
 
     result = await adapter.find_service(service)
 
-    assert result is False
-    assert api.connect_started_count == 1
+    assert result is True
+    assert api.availability_calls[service.service_id] == 2
 
 
 def test_someipy_adapter_is_someip_adapter_implementation() -> None:
@@ -133,8 +133,6 @@ async def test_someipy_adapter_protocol_actions_raise_not_implemented(adc40_soc_
     event = event_service.events[0]
     field = field_service.fields[0]
 
-    with pytest.raises(NotImplementedError, match="subscribe_eventgroup.*Phase A adapter skeleton"):
-        await adapter.subscribe_eventgroup(event_service, event.eventgroup_id or 0)
     with pytest.raises(NotImplementedError, match="publish_event.*Phase A adapter skeleton"):
         await adapter.publish_event(event_service, event, b"\x01")
     with pytest.raises(NotImplementedError, match="field_notify.*Phase A adapter skeleton"):
@@ -144,16 +142,34 @@ async def test_someipy_adapter_protocol_actions_raise_not_implemented(adc40_soc_
 
 
 @pytest.mark.asyncio
-async def test_someipy_adapter_unsubscribe_raises_not_implemented(adc40_soc_dir) -> None:
-    api = FakeSomeipyApi()
-    adapter = SomeipyAdapter(api=api, local_ip="127.0.0.1", base_port=30500)
+async def test_someipy_adapter_subscribes_eventgroup_with_service_ttl(adc40_soc_dir) -> None:
     service = load_service_definition(adc40_soc_dir / "0x080E.json")
     event = service.events[0]
+    assert event.eventgroup_id is not None
+    api = FakeSomeipyApi()
+    adapter = SomeipyAdapter(api=api, local_ip="127.0.0.1", base_port=31000)
 
-    with pytest.raises(NotImplementedError, match="unsubscribe_eventgroup.*Phase A adapter skeleton"):
-        await adapter.unsubscribe_eventgroup(service, event.eventgroup_id or 0)
+    await adapter.subscribe_eventgroup(service, event.eventgroup_id)
 
-    assert api.connect_started_count == 1
+    assert api.clients[0].subscribed_eventgroups == [
+        (event.eventgroup_id, int(service.deployment.find_ttl_s))
+    ]
+    assert adapter._service_runtimes[service.service_id].active_eventgroups == {event.eventgroup_id}
+
+
+@pytest.mark.asyncio
+async def test_someipy_adapter_unsubscribes_eventgroup(adc40_soc_dir) -> None:
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+    event = service.events[0]
+    assert event.eventgroup_id is not None
+    api = FakeSomeipyApi()
+    adapter = SomeipyAdapter(api=api, local_ip="127.0.0.1", base_port=31000)
+
+    await adapter.subscribe_eventgroup(service, event.eventgroup_id)
+    await adapter.unsubscribe_eventgroup(service, event.eventgroup_id)
+
+    assert api.clients[0].unsubscribed_eventgroups == [event.eventgroup_id]
+    assert adapter._service_runtimes[service.service_id].active_eventgroups == set()
 
 
 @pytest.mark.asyncio

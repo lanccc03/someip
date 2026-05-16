@@ -32,6 +32,8 @@ FIELD_SET_NOT_IMPLEMENTED = (
 _PORT_STRIDE = 10
 _CYCLIC_OFFER_DELAY_MS = 1000
 _CLIENT_ID_BASE = 0x1000
+FIND_AVAILABILITY_ATTEMPTS = 3
+FIND_AVAILABILITY_DELAY_S = 0.05
 
 
 @dataclass
@@ -77,7 +79,12 @@ class SomeipyAdapter(SomeIpAdapter):
         await self.start_service(service)
 
     async def find_service(self, service: ServiceDefinition) -> bool:
-        await self._ensure_daemon()
+        runtime = await self._runtime_for_service(service)
+        for attempt in range(FIND_AVAILABILITY_ATTEMPTS):
+            if bool(await _maybe_await(runtime.client.is_available())):
+                return True
+            if attempt < FIND_AVAILABILITY_ATTEMPTS - 1:
+                await asyncio.sleep(FIND_AVAILABILITY_DELAY_S)
         return False
 
     async def call_method(
@@ -116,16 +123,21 @@ class SomeipyAdapter(SomeIpAdapter):
         self._event_handlers.setdefault(key, []).append(handler)
 
     async def subscribe_eventgroup(self, service: ServiceDefinition, eventgroup_id: int) -> None:
-        await self._ensure_daemon()
-        raise NotImplementedError(
-            "someipy subscribe_eventgroup execution is not implemented in Phase A adapter skeleton"
+        runtime = await self._runtime_for_service(service)
+        eventgroup = self._eventgroup_for(service, eventgroup_id)
+        await _maybe_await(
+            runtime.client.subscribe_eventgroup(
+                eventgroup,
+                ttl_subscription_seconds=int(service.deployment.find_ttl_s),
+            )
         )
+        runtime.active_eventgroups.add(eventgroup_id)
 
     async def unsubscribe_eventgroup(self, service: ServiceDefinition, eventgroup_id: int) -> None:
-        await self._ensure_daemon()
-        raise NotImplementedError(
-            "someipy unsubscribe_eventgroup execution is not implemented in Phase A adapter skeleton"
-        )
+        runtime = await self._runtime_for_service(service)
+        eventgroup = self._eventgroup_for(service, eventgroup_id)
+        await _maybe_await(runtime.client.unsubscribe_eventgroup(eventgroup))
+        runtime.active_eventgroups.discard(eventgroup_id)
 
     async def publish_event(
         self,
@@ -290,6 +302,35 @@ class SomeipyAdapter(SomeIpAdapter):
         )
         self._service_runtimes[service.service_id] = runtime
         return runtime
+
+    def _eventgroup_for(self, service: ServiceDefinition, eventgroup_id: int) -> Any:
+        api = self._api
+        if api is None:
+            raise RuntimeError("someipy API was not initialized")
+        factory = SomeipyServiceFactory(api)
+        events = []
+        for event in service.events:
+            if event.eventgroup_id == eventgroup_id:
+                events.append(
+                    api.Event(
+                        id=event.event_id,
+                        protocol=factory.protocol_for(event.transport),
+                    )
+                )
+        for field in service.fields:
+            notifier = field.notifier
+            if notifier is not None and notifier.eventgroup_id == eventgroup_id:
+                events.append(
+                    api.Event(
+                        id=notifier.element_id,
+                        protocol=factory.protocol_for(notifier.transport),
+                    )
+                )
+        if not events:
+            raise ValueError(
+                f"Eventgroup 0x{eventgroup_id:04X} not found in service {service.service_id_hex}"
+            )
+        return api.EventGroup(id=eventgroup_id, events=events)
 
 
 async def _maybe_await(value: Any) -> Any:

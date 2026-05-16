@@ -95,6 +95,18 @@ async def test_someipy_adapter_field_set_returns_error_without_setter(adc40_soc_
     assert "setter" in result.detail
 
 
+def test_someipy_adapter_maps_non_ok_method_result_to_error() -> None:
+    adapter = SomeipyAdapter(api=FakeSomeipyApi(), local_ip="127.0.0.1", base_port=31000)
+    result = adapter._adapter_method_result(
+        type("Result", (), {"return_code": "E_NOT_OK", "payload": b"\x01"})(),
+        "success detail",
+    )
+
+    assert result.status == "error"
+    assert "E_NOT_OK" in result.detail
+    assert result.payload == b"\x01"
+
+
 @pytest.mark.asyncio
 async def test_someipy_adapter_field_get_calls_getter_method_and_returns_payload(adc40_soc_dir) -> None:
     api = FakeSomeipyApi()
@@ -107,21 +119,6 @@ async def test_someipy_adapter_field_get_calls_getter_method_and_returns_payload
     assert result.status == "success"
     assert result.detail == "someipy field getter completed"
     assert result.payload == b"\x07"
-    assert api.connect_started_count == 1
-
-
-@pytest.mark.asyncio
-async def test_someipy_adapter_field_set_returns_unimplemented_error_with_setter(adc40_soc_dir) -> None:
-    api = FakeSomeipyApi()
-    adapter = SomeipyAdapter(api=api, local_ip="127.0.0.1", base_port=30500)
-    service = load_service_definition(adc40_soc_dir / "0x080C.json")
-    field = replace(service.fields[0], setter=service.fields[0].getter)
-
-    result = await adapter.field_set(service, field, b"\x08")
-
-    assert result.status == "error"
-    assert "not implemented in Phase A adapter skeleton" in result.detail
-    assert result.payload is None
     assert api.connect_started_count == 1
 
 

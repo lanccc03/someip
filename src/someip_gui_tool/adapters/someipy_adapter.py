@@ -26,9 +26,6 @@ from someip_gui_tool.domain.models import (
 )
 
 
-FIELD_SET_NOT_IMPLEMENTED = (
-    "someipy field setter execution is not implemented in Phase A adapter skeleton"
-)
 _PORT_STRIDE = 10
 _CYCLIC_OFFER_DELAY_MS = 1000
 _CLIENT_ID_BASE = 0x1000
@@ -173,7 +170,7 @@ class SomeipyAdapter(SomeIpAdapter):
         if field.setter is None:
             return AdapterMethodResult(status="error", detail=f"Field {field.name!r} has no setter")
         await self._ensure_daemon()
-        return AdapterMethodResult(status="error", detail=FIELD_SET_NOT_IMPLEMENTED)
+        return AdapterMethodResult(status="error", detail="someipy field setter execution is not implemented")
 
     async def field_notify(
         self,

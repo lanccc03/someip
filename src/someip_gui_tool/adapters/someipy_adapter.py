@@ -64,7 +64,7 @@ class SomeipyAdapter(SomeIpAdapter):
         self._daemon_lock = asyncio.Lock()
         self._event_handlers: dict[tuple[int, int], list[EventHandler]] = {}
         self._service_runtimes: dict[int, _SomeipyServiceRuntime] = {}
-        self._service_order: dict[int, int] = {}
+        self._next_service_index = 0
 
     async def start_service(self, service: ServiceDefinition) -> None:
         runtime = await self._runtime_for_service(service)
@@ -75,7 +75,6 @@ class SomeipyAdapter(SomeIpAdapter):
         if runtime is not None:
             await _maybe_await(runtime.server.stop_offer())
         self._service_runtimes.pop(service.service_id, None)
-        self._service_order.pop(service.service_id, None)
         self._clear_service_handlers(service.service_id)
 
     async def offer_service(self, service: ServiceDefinition) -> None:
@@ -220,6 +219,11 @@ class SomeipyAdapter(SomeIpAdapter):
         async with self._daemon_lock:
             daemon = self._daemon
             self._daemon = None
+            for runtime in list(self._service_runtimes.values()):
+                try:
+                    await _maybe_await(runtime.server.stop_offer())
+                except Exception:
+                    pass
             self._service_runtimes.clear()
             self._event_handlers.clear()
             try:
@@ -344,7 +348,8 @@ class SomeipyAdapter(SomeIpAdapter):
             method_handler_factory=self._method_handler_factory(api),
         )
         mapped_service = factory.build_service(service)
-        service_index = self._service_order.setdefault(service.service_id, len(self._service_order))
+        service_index = self._next_service_index
+        self._next_service_index += 1
         endpoint_port = self._base_port + service_index * _PORT_STRIDE
         client_port = endpoint_port + 1
         server = api.ServerServiceInstance(

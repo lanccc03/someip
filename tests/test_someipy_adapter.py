@@ -359,3 +359,37 @@ async def test_someipy_adapter_can_own_someipyd_process(adc40_soc_dir, monkeypat
     assert started[0][0].tcp_port == 31000
     assert started[0][1] == tmp_path
     assert stopped == [True]
+
+
+@pytest.mark.asyncio
+async def test_someipy_adapter_assigns_monotonic_ports_across_stop_restart(adc40_soc_dir) -> None:
+    """Regression: stop+restart must not reuse an index that is still in use."""
+    api = FakeSomeipyApi()
+    adapter = SomeipyAdapter(api=api, local_ip="127.0.0.1", base_port=31000)
+    svc_a = load_service_definition(adc40_soc_dir / "0x080A.json")
+    svc_c = load_service_definition(adc40_soc_dir / "0x080C.json")
+    svc_e = load_service_definition(adc40_soc_dir / "0x080E.json")
+
+    await adapter.start_service(svc_a)
+    await adapter.start_service(svc_c)
+    await adapter.stop_service(svc_a)
+    await adapter.start_service(svc_e)
+
+    rt_c = adapter._service_runtimes[svc_c.service_id]
+    rt_e = adapter._service_runtimes[svc_e.service_id]
+    assert rt_c.endpoint_port == 31010
+    assert rt_e.endpoint_port == 31020
+    assert {rt_c.endpoint_port, rt_e.endpoint_port} == {31010, 31020}
+
+
+@pytest.mark.asyncio
+async def test_someipy_adapter_shutdown_stops_active_offers(adc40_soc_dir) -> None:
+    """Regression: shutdown must best-effort stop_offer on every active service."""
+    api = FakeSomeipyApi()
+    adapter = SomeipyAdapter(api=api, local_ip="127.0.0.1", base_port=31000)
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+
+    await adapter.start_service(service)
+    await adapter.shutdown()
+
+    assert api.servers[0].stop_awaited is True

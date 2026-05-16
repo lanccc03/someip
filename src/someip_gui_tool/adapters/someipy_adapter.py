@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -14,7 +16,7 @@ from someip_gui_tool.adapters.base import (
 )
 from someip_gui_tool.adapters.capabilities import SOMEIPY_FF_LIMITATION
 from someip_gui_tool.adapters.someipy_api import SomeipyApiProbe
-from someip_gui_tool.adapters.someipy_daemon import SomeipydConfig
+from someip_gui_tool.adapters.someipy_daemon import SomeipydConfig, SomeipydProcess
 from someip_gui_tool.adapters.someipy_mapping import SomeipyServiceFactory
 from someip_gui_tool.domain.models import (
     EventDefinition,
@@ -51,10 +53,16 @@ class SomeipyAdapter(SomeIpAdapter):
         api: Any | None = None,
         local_ip: str,
         base_port: int,
+        start_daemon: bool = False,
+        daemon_work_dir: Path | None = None,
     ) -> None:
         self._api = api
         self._local_ip = local_ip
         self._base_port = base_port
+        self._start_daemon = start_daemon
+        self._daemon_work_dir = daemon_work_dir
+        self._owned_daemon_process: SomeipydProcess | None = None
+        self._owned_temp_dir: tempfile.TemporaryDirectory[str] | None = None
         self._daemon: Any | None = None
         self._daemon_lock = asyncio.Lock()
         self._event_handlers: dict[tuple[int, int], list[EventHandler]] = {}
@@ -203,18 +211,29 @@ class SomeipyAdapter(SomeIpAdapter):
             )
         return AdapterMethodResult(status="success", detail=success_detail, payload=payload)
 
+    def _stop_owned_daemon_process(self) -> None:
+        if self._owned_daemon_process is not None:
+            self._owned_daemon_process.stop()
+            self._owned_daemon_process = None
+        if self._owned_temp_dir is not None:
+            self._owned_temp_dir.cleanup()
+            self._owned_temp_dir = None
+
     async def shutdown(self) -> None:
         async with self._daemon_lock:
             daemon = self._daemon
             self._daemon = None
+            self._service_runtimes.clear()
             self._event_handlers.clear()
-            if daemon is None:
-                return
-            disconnect = getattr(daemon, "disconnect_from_daemon", None)
-            if disconnect is not None:
-                result = disconnect()
-                if inspect.isawaitable(result):
-                    await result
+            try:
+                if daemon is not None:
+                    disconnect = getattr(daemon, "disconnect_from_daemon", None)
+                    if disconnect is not None:
+                        result = disconnect()
+                        if inspect.isawaitable(result):
+                            await result
+            finally:
+                self._stop_owned_daemon_process()
 
     async def _ensure_daemon(self) -> Any:
         if self._daemon is not None:
@@ -229,12 +248,31 @@ class SomeipyAdapter(SomeIpAdapter):
                 api = SomeipyApiProbe().require_module()
                 self._api = api
 
+            if self._start_daemon and self._owned_daemon_process is None:
+                work_dir = self._daemon_work_dir
+                if work_dir is None:
+                    self._owned_temp_dir = tempfile.TemporaryDirectory(prefix="someipyd-adapter-")
+                    work_dir = Path(self._owned_temp_dir.name)
+                config = SomeipydConfig(
+                    interface=self._local_ip,
+                    tcp_host=self._local_ip,
+                    tcp_port=self._base_port,
+                )
+                self._owned_daemon_process = SomeipydProcess.start(
+                    config=config,
+                    work_dir=work_dir,
+                )
+
             config = SomeipydConfig(
                 interface=self._local_ip,
                 tcp_host=self._local_ip,
                 tcp_port=self._base_port,
             ).client_config()
-            self._daemon = await api.connect_to_someipy_daemon(config)
+            try:
+                self._daemon = await api.connect_to_someipy_daemon(config)
+            except Exception:
+                self._stop_owned_daemon_process()
+                raise
             return self._daemon
 
     def _clear_service_handlers(self, service_id: int) -> None:

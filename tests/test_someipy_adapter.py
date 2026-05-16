@@ -327,3 +327,38 @@ async def test_someipy_adapter_stop_service_stops_offer_and_removes_runtime(adc4
 
     assert api.servers[0].stop_awaited is True
     assert service.service_id not in adapter._service_runtimes
+
+
+@pytest.mark.asyncio
+async def test_someipy_adapter_can_own_someipyd_process(adc40_soc_dir, monkeypatch, tmp_path) -> None:
+    api = FakeSomeipyApi()
+    started = []
+    stopped = []
+
+    class FakeProcess:
+        def stop(self) -> None:
+            stopped.append(True)
+
+    def fake_start(config, work_dir):
+        started.append((config, work_dir))
+        return FakeProcess()
+
+    monkeypatch.setattr("someip_gui_tool.adapters.someipy_adapter.SomeipydProcess.start", fake_start)
+    adapter = SomeipyAdapter(
+        api=api,
+        local_ip="127.0.0.1",
+        base_port=31000,
+        start_daemon=True,
+        daemon_work_dir=tmp_path,
+    )
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+
+    await adapter.start_service(service)
+    await adapter.shutdown()
+
+    assert len(started) == 1
+    assert started[0][0].interface == "127.0.0.1"
+    assert started[0][0].tcp_host == "127.0.0.1"
+    assert started[0][0].tcp_port == 31000
+    assert started[0][1] == tmp_path
+    assert stopped == [True]

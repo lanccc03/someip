@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any
 
 from someip_gui_tool.adapters.base import (
@@ -12,6 +14,7 @@ from someip_gui_tool.adapters.base import (
 from someip_gui_tool.adapters.capabilities import SOMEIPY_FF_LIMITATION
 from someip_gui_tool.adapters.someipy_api import SomeipyApiProbe
 from someip_gui_tool.adapters.someipy_daemon import SomeipydConfig
+from someip_gui_tool.adapters.someipy_mapping import SomeipyServiceFactory
 from someip_gui_tool.domain.models import (
     EventDefinition,
     FieldDefinition,
@@ -26,6 +29,19 @@ FIELD_GET_NOT_IMPLEMENTED = (
 FIELD_SET_NOT_IMPLEMENTED = (
     "someipy field setter execution is not implemented in Phase A adapter skeleton"
 )
+_PORT_STRIDE = 10
+_CYCLIC_OFFER_DELAY_MS = 1000
+_CLIENT_ID_BASE = 0x1000
+
+
+@dataclass
+class _SomeipyServiceRuntime:
+    mapped_service: Any
+    server: Any
+    client: Any
+    endpoint_port: int
+    client_port: int
+    active_eventgroups: set[int]
 
 
 class SomeipyAdapter(SomeIpAdapter):
@@ -42,15 +58,23 @@ class SomeipyAdapter(SomeIpAdapter):
         self._daemon: Any | None = None
         self._daemon_lock = asyncio.Lock()
         self._event_handlers: dict[tuple[int, int], list[EventHandler]] = {}
+        self._service_runtimes: dict[int, _SomeipyServiceRuntime] = {}
+        self._service_order: dict[int, int] = {}
 
     async def start_service(self, service: ServiceDefinition) -> None:
-        await self._ensure_daemon()
+        runtime = await self._runtime_for_service(service)
+        await _maybe_await(runtime.server.start_offer())
 
     async def stop_service(self, service: ServiceDefinition) -> None:
+        runtime = self._service_runtimes.get(service.service_id)
+        if runtime is not None:
+            await _maybe_await(runtime.server.stop_offer())
+        self._service_runtimes.pop(service.service_id, None)
+        self._service_order.pop(service.service_id, None)
         self._clear_service_handlers(service.service_id)
 
     async def offer_service(self, service: ServiceDefinition) -> None:
-        await self._ensure_daemon()
+        await self.start_service(service)
 
     async def find_service(self, service: ServiceDefinition) -> bool:
         await self._ensure_daemon()
@@ -187,3 +211,88 @@ class SomeipyAdapter(SomeIpAdapter):
         stale_keys = [key for key in self._event_handlers if key[0] == service_id]
         for key in stale_keys:
             del self._event_handlers[key]
+
+    def _dispatch_event(
+        self,
+        service: ServiceDefinition,
+        event_id: int,
+        payload: bytes,
+    ) -> None:
+        pass  # implemented in Task 4
+
+    def _method_handler_factory(self, api: Any) -> Any:
+        def handler_factory(service: ServiceDefinition, method_part: Any) -> Any:
+            async def method_handler(input_data: bytes, addr: tuple[str, int]) -> Any:
+                result_type = getattr(api, "MethodResult", None)
+                result = result_type() if result_type is not None else SimpleNamespace()
+                message_type = getattr(api, "MessageType", None)
+                return_code = getattr(api, "ReturnCode", None)
+                result.message_type = (
+                    getattr(message_type, "RESPONSE", None)
+                    if message_type is not None
+                    else "RESPONSE"
+                )
+                result.return_code = (
+                    getattr(return_code, "E_OK", None) if return_code is not None else "E_OK"
+                )
+                result.payload = input_data
+                return result
+
+            return method_handler
+
+        return handler_factory
+
+    async def _runtime_for_service(self, service: ServiceDefinition) -> _SomeipyServiceRuntime:
+        runtime = self._service_runtimes.get(service.service_id)
+        if runtime is not None:
+            return runtime
+
+        daemon = await self._ensure_daemon()
+        api = self._api
+        if api is None:
+            raise RuntimeError("someipy API was not initialized")
+
+        factory = SomeipyServiceFactory(
+            api,
+            method_handler_factory=self._method_handler_factory(api),
+        )
+        mapped_service = factory.build_service(service)
+        service_index = self._service_order.setdefault(service.service_id, len(self._service_order))
+        endpoint_port = self._base_port + service_index * _PORT_STRIDE
+        client_port = endpoint_port + 1
+        server = api.ServerServiceInstance(
+            daemon=daemon,
+            service=mapped_service,
+            instance_id=service.deployment.instance_id,
+            endpoint_ip=self._local_ip,
+            endpoint_port=endpoint_port,
+            ttl=int(service.deployment.offer_ttl_s),
+            cyclic_offer_delay_ms=_CYCLIC_OFFER_DELAY_MS,
+        )
+        client = api.ClientServiceInstance(
+            daemon=daemon,
+            service=mapped_service,
+            instance_id=service.deployment.instance_id,
+            endpoint_ip=self._local_ip,
+            endpoint_port=client_port,
+            client_id=_CLIENT_ID_BASE + service_index,
+        )
+        client.register_callback(
+            lambda event_id, payload: self._dispatch_event(service, event_id, payload)
+        )
+        runtime = _SomeipyServiceRuntime(
+            mapped_service=mapped_service,
+            server=server,
+            client=client,
+            endpoint_port=endpoint_port,
+            client_port=client_port,
+            active_eventgroups=set(),
+        )
+        self._service_runtimes[service.service_id] = runtime
+        return runtime
+
+
+async def _maybe_await(value: Any) -> Any:
+    if inspect.isawaitable(value):
+        return await value
+    return value

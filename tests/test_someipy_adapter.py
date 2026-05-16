@@ -208,3 +208,51 @@ async def test_someipy_adapter_shutdown_clears_handlers_and_daemon(adc40_soc_dir
     assert adapter._event_handlers == {}
     assert adapter._daemon is None
     assert api.daemon.disconnected is True
+
+
+@pytest.mark.asyncio
+async def test_someipy_adapter_start_service_creates_server_and_client_instances(adc40_soc_dir) -> None:
+    api = FakeSomeipyApi()
+    adapter = SomeipyAdapter(api=api, local_ip="127.0.0.1", base_port=31000)
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+
+    await adapter.start_service(service)
+
+    assert api.connect_started_count == 1
+    assert len(api.servers) == 1
+    assert len(api.clients) == 1
+    assert api.servers[0].service.id == service.service_id
+    assert api.clients[0].service.id == service.service_id
+    assert api.servers[0].endpoint_ip == "127.0.0.1"
+    assert api.clients[0].endpoint_ip == "127.0.0.1"
+    assert api.servers[0].endpoint_port == 31000
+    assert api.clients[0].endpoint_port == 31001
+    assert api.servers[0].start_awaited is True
+
+
+@pytest.mark.asyncio
+async def test_someipy_adapter_repeated_start_reuses_service_runtime(adc40_soc_dir) -> None:
+    api = FakeSomeipyApi()
+    adapter = SomeipyAdapter(api=api, local_ip="127.0.0.1", base_port=31000)
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+
+    await adapter.start_service(service)
+    await adapter.start_service(service)
+
+    assert api.connect_started_count == 1
+    assert len(api.servers) == 1
+    assert len(api.clients) == 1
+    assert api.servers[0].start_awaited is True
+
+
+@pytest.mark.asyncio
+async def test_someipy_adapter_stop_service_stops_offer_and_removes_runtime(adc40_soc_dir) -> None:
+    api = FakeSomeipyApi()
+    adapter = SomeipyAdapter(api=api, local_ip="127.0.0.1", base_port=31000)
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+
+    await adapter.start_service(service)
+    await adapter.stop_service(service)
+
+    assert api.servers[0].stop_awaited is True
+    assert service.service_id not in adapter._service_runtimes

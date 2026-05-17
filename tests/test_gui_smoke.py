@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from PySide6.QtCore import Qt
 
@@ -202,3 +204,94 @@ def test_runtime_panel_rejects_non_integer_port(qtbot, adc40_soc_dir):
 
     with pytest.raises(ValueError, match="Server port must be an integer"):
         window.runtime_panel.config_for_service(service)
+
+
+def test_operation_panel_shows_default_payload_for_client_event(qtbot, adc40_soc_dir):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.load_service_directory(adc40_soc_dir)
+    event_items = window.service_tree.findItems(
+        "Event VehicleInfo",
+        Qt.MatchFlag.MatchContains | Qt.MatchFlag.MatchRecursive,
+    )
+
+    window.service_tree.setCurrentItem(event_items[0])
+
+    assert window.operation_panel.primary_button.text() == "Subscribe"
+    assert window.operation_panel.secondary_button.text() == "Publish"
+    assert window.operation_panel.primary_button.isEnabled()
+    assert not window.operation_panel.secondary_button.isEnabled()
+    assert json.loads(window.operation_panel.payload_text.toPlainText()) == {
+        "VehicleInfo": {"VehicleSpeed": 0.0, "Odometer": 0.0}
+    }
+
+
+def test_operation_panel_enables_publish_for_server_event(qtbot, adc40_soc_dir):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.load_service_directory(adc40_soc_dir)
+    event_items = window.service_tree.findItems(
+        "Event VehicleInfo",
+        Qt.MatchFlag.MatchContains | Qt.MatchFlag.MatchRecursive,
+    )
+    service_item = event_items[0].parent()
+
+    window.service_tree.setCurrentItem(service_item)
+    window.runtime_panel.role_combo.setCurrentText(Role.SERVER.value)
+    window.service_tree.setCurrentItem(event_items[0])
+
+    assert window.operation_panel.primary_button.text() == "Publish"
+    assert window.operation_panel.primary_button.isEnabled()
+    assert window.operation_panel.secondary_button.text() == "Subscribe"
+    assert not window.operation_panel.secondary_button.isEnabled()
+
+
+def test_operation_panel_uses_field_role_actions(qtbot, adc40_soc_dir):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.load_service_directory(adc40_soc_dir)
+    field_item = window.service_tree.findItems(
+        "Field VertHeiRmdSts",
+        Qt.MatchFlag.MatchContains | Qt.MatchFlag.MatchRecursive,
+    )[0]
+    service_item = field_item.parent()
+
+    window.service_tree.setCurrentItem(field_item)
+    assert window.operation_panel.primary_button.text() == "Get"
+    assert window.operation_panel.primary_button.isEnabled()
+    assert window.operation_panel.secondary_button.text() == "Notify"
+    assert not window.operation_panel.secondary_button.isEnabled()
+
+    window.service_tree.setCurrentItem(service_item)
+    window.runtime_panel.role_combo.setCurrentText(Role.SERVER.value)
+    window.service_tree.setCurrentItem(field_item)
+    assert window.operation_panel.primary_button.text() == "Notify"
+    assert window.operation_panel.primary_button.isEnabled()
+    assert window.operation_panel.secondary_button.text() == "Get"
+    assert not window.operation_panel.secondary_button.isEnabled()
+
+
+def test_operation_panel_disables_method_response_configuration(qtbot, adc40_soc_dir):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.load_service_directory(adc40_soc_dir)
+    method_items = window.service_tree.findItems(
+        "Method SecondStartCtrl",
+        Qt.MatchFlag.MatchContains | Qt.MatchFlag.MatchRecursive,
+    )
+
+    window.service_tree.setCurrentItem(method_items[0])
+
+    assert window.operation_panel.primary_button.text() == "Call"
+    assert window.operation_panel.primary_button.isEnabled()
+    assert window.operation_panel.secondary_button.text() == "Configure Response"
+    assert not window.operation_panel.secondary_button.isEnabled()
+
+    service_item = method_items[0].parent()
+    window.service_tree.setCurrentItem(service_item)
+    window.runtime_panel.role_combo.setCurrentText(Role.SERVER.value)
+    window.service_tree.setCurrentItem(method_items[0])
+    assert window.operation_panel.primary_button.text() == "Configure Handler"
+    assert not window.operation_panel.primary_button.isEnabled()
+    assert window.operation_panel.secondary_button.text() == "Configure Response"
+    assert not window.operation_panel.secondary_button.isEnabled()

@@ -157,12 +157,13 @@ class MainWindow(QMainWindow):
         if service is not None:
             self._set_runtime_config(service)
 
+        role = Role(self.runtime_panel.role_combo.currentText())
         if isinstance(payload, MethodDefinition):
-            self.operation_panel.show_method(payload)
+            self.operation_panel.show_method(payload, role)
         elif isinstance(payload, EventDefinition):
-            self.operation_panel.show_event(payload)
+            self.operation_panel.show_event(payload, role)
         elif isinstance(payload, FieldDefinition):
-            self.operation_panel.show_field(payload)
+            self.operation_panel.show_field(payload, role)
         else:
             self.operation_panel.clear_selection()
 

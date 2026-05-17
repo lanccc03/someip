@@ -676,3 +676,39 @@ def test_main_window_reports_definition_import_failure(qtbot, tmp_path):
     assert str(broken_directory) in window.problems_view.toPlainText()
     assert "definition_import_failed" in window.run_log_view.toPlainText()
     assert "Failed to import service definitions" in window.details.toPlainText()
+
+
+def test_main_window_blocks_definition_import_while_services_run(
+    qtbot,
+    adc40_soc_dir,
+):
+    dialog_calls = []
+
+    def choose_directory(parent):
+        dialog_calls.append(parent)
+        return adc40_soc_dir
+
+    window = MainWindow(
+        async_runner=_run_immediate,
+        definition_directory_dialog=choose_directory,
+    )
+    qtbot.addWidget(window)
+    window.load_service_directory(adc40_soc_dir)
+    service_item = window.service_tree.topLevelItem(0)
+    original_top_level_count = window.service_tree.topLevelItemCount()
+
+    window.service_tree.setCurrentItem(service_item)
+    window.runtime_panel.server_port_edit.setText("30500")
+    window.runtime_panel.client_port_edit.setText("30501")
+    qtbot.mouseClick(window.operation_panel.primary_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: "Started service" in window.run_log_view.toPlainText())
+
+    window.open_definition_directory_action.trigger()
+
+    assert len(dialog_calls) == 0
+    assert "definition_import_blocked_service_running" in window.problems_view.toPlainText()
+    assert "Stop running services" in window.problems_view.toPlainText()
+    assert "definition_import_blocked_service_running" in window.run_log_view.toPlainText()
+    assert window.service_tree.topLevelItemCount() == original_top_level_count
+    assert not window.operation_panel.primary_button.isEnabled()
+    assert window.operation_panel.secondary_button.isEnabled()

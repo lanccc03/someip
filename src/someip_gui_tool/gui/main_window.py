@@ -156,6 +156,10 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self.open_definition_directory_action)
 
     def open_definition_directory(self) -> None:
+        if self._running_service_ids:
+            self._record_definition_import_blocked_while_running()
+            self._refresh_runtime_views()
+            return
         directory = self._definition_directory_dialog(self)
         if directory is None:
             return
@@ -408,6 +412,28 @@ class MainWindow(QMainWindow):
                 source="GUI",
                 message=message,
                 error_detail="definition_import_failed",
+            )
+        )
+        self.details.setPlainText(message)
+        self.statusBar().showMessage(message)
+
+    def _record_definition_import_blocked_while_running(self) -> None:
+        message = "Stop running services before importing a new definition directory."
+        self.session.problems.append(
+            RuntimeProblem(
+                code="definition_import_blocked_service_running",
+                severity="warning",
+                message=message,
+                service_id=0,
+            )
+        )
+        self.session.run_log.append(
+            RunLogEntry(
+                timestamp=datetime.now(timezone.utc),
+                level="warning",
+                source="GUI",
+                message=message,
+                error_detail="definition_import_blocked_service_running",
             )
         )
         self.details.setPlainText(message)

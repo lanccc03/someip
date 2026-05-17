@@ -565,3 +565,31 @@ def test_main_window_opens_definition_directory_from_action(qtbot, adc40_soc_dir
     assert "Loaded" in window.details.toPlainText()
     assert str(adc40_soc_dir) in window.details.toPlainText()
     assert "Loaded" in window.run_log_view.toPlainText()
+
+
+def test_main_window_open_definition_directory_cancel_is_noop(qtbot):
+    window = MainWindow(definition_directory_dialog=lambda parent: None)
+    qtbot.addWidget(window)
+
+    window.open_definition_directory_action.trigger()
+
+    assert window.service_tree.topLevelItemCount() == 0
+    assert window.run_log_view.toPlainText() == ""
+    assert window.problems_view.toPlainText() == ""
+
+
+def test_main_window_reports_definition_import_failure(qtbot, tmp_path):
+    broken_directory = tmp_path / "definitions"
+    broken_directory.mkdir()
+    (broken_directory / "broken.json").write_text("{", encoding="utf-8")
+
+    window = MainWindow(definition_directory_dialog=lambda parent: broken_directory)
+    qtbot.addWidget(window)
+
+    window.open_definition_directory_action.trigger()
+
+    assert window.service_tree.topLevelItemCount() == 0
+    assert "definition_import_failed" in window.problems_view.toPlainText()
+    assert str(broken_directory) in window.problems_view.toPlainText()
+    assert "definition_import_failed" in window.run_log_view.toPlainText()
+    assert "Failed to import service definitions" in window.details.toPlainText()

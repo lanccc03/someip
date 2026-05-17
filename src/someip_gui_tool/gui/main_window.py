@@ -158,7 +158,11 @@ class MainWindow(QMainWindow):
         directory = self._definition_directory_dialog(self)
         if directory is None:
             return
-        self.load_service_directory(directory)
+        try:
+            self.load_service_directory(directory)
+        except Exception as exc:
+            self._record_definition_import_error(directory, exc)
+            self._refresh_runtime_views()
 
     def load_service_directory(self, directory: Path) -> None:
         self._registry = ServiceRegistry.load_directory(directory)
@@ -363,6 +367,28 @@ class MainWindow(QMainWindow):
                 error_detail=code,
             )
         )
+        self.statusBar().showMessage(message)
+
+    def _record_definition_import_error(self, directory: Path, error: Exception) -> None:
+        message = f"Failed to import service definitions from {directory}: {error}"
+        self.session.problems.append(
+            RuntimeProblem(
+                code="definition_import_failed",
+                severity="error",
+                message=message,
+                service_id=0,
+            )
+        )
+        self.session.run_log.append(
+            RunLogEntry(
+                timestamp=datetime.now(timezone.utc),
+                level="error",
+                source="GUI",
+                message=message,
+                error_detail="definition_import_failed",
+            )
+        )
+        self.details.setPlainText(message)
         self.statusBar().showMessage(message)
 
     def _refresh_runtime_views(self) -> None:

@@ -1,3 +1,4 @@
+import pytest
 from PySide6.QtCore import Qt
 
 from someip_gui_tool.core.runtime_config import infer_runtime_config
@@ -165,3 +166,39 @@ def test_main_window_clears_field_operations_when_field_part_selected(
     assert window.operation_panel.title_label.text() == "Select a method, event, or field"
     assert window.operation_panel.primary_button.text() == "Start"
     assert window.operation_panel.secondary_button.text() == "Stop"
+
+
+def test_runtime_panel_returns_user_edited_config(qtbot, adc40_soc_dir):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.load_service_directory(adc40_soc_dir)
+    service_item = window.service_tree.topLevelItem(0)
+    service = service_item.data(0, Qt.ItemDataRole.UserRole)
+
+    window.service_tree.setCurrentItem(service_item)
+    window.runtime_panel.role_combo.setCurrentText(Role.SERVER.value)
+    window.runtime_panel.server_port_edit.setText("30500")
+    window.runtime_panel.client_port_edit.setText("30501")
+
+    config = window.runtime_panel.config_for_service(service)
+
+    assert config.role is Role.SERVER
+    assert config.service_id == service.service_id
+    assert config.instance_id == service.deployment.instance_id
+    assert config.server_port == 30500
+    assert config.client_port == 30501
+
+
+def test_runtime_panel_rejects_non_integer_port(qtbot, adc40_soc_dir):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.load_service_directory(adc40_soc_dir)
+    service_item = window.service_tree.topLevelItem(0)
+    service = service_item.data(0, Qt.ItemDataRole.UserRole)
+
+    window.service_tree.setCurrentItem(service_item)
+    window.runtime_panel.server_port_edit.setText("abc")
+    window.runtime_panel.client_port_edit.setText("30501")
+
+    with pytest.raises(ValueError, match="Server port must be an integer"):
+        window.runtime_panel.config_for_service(service)

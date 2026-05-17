@@ -10,20 +10,20 @@ The tool uses PySide for the desktop application. The first protocol implementat
 
 ## 2. Phase Goals
 
-MVP-1 focuses on protocol loop closure:
+MVP-1 focuses on GUI runtime loop closure:
 
-- Import `ADC40_SOC/*.json` service definition files.
+- Open a service definition directory from the GUI and import `ADC40_SOC/*.json` service definition files.
 - Select Client or Server role per service.
-- Support TCP and UDP according to each service, method, event, or field definition.
-- Keep JSON files as base definitions and save runtime changes as project overrides.
-- Support method call, event subscription/publish, and field getter/setter/notifier behavior.
-- Support structured payload editing and raw hex editing.
-- Provide run logs, message trace, and JSON/CSV trace export.
-- Package as a Windows x64 desktop application.
+- Support TCP and UDP for the service, event, and field paths proven by the active adapter.
+- Keep JSON files as read-only base definitions. Project-file persistence for runtime overrides is MVP-2 work.
+- Support service start/stop, event subscription/publish, field getter/notifier behavior, and method actions with explicit backend status.
+- Use a JSON payload editor with deterministic default payload values.
+- Provide run logs, message trace, problems, and JSON/CSV trace export.
+- Package as a Windows x64 desktop application after the GUI can run at least one supported real backend scenario.
 
 MVP-2 focuses on GUI efficiency:
 
-- Service tree, search, filtering, payload forms, project management, and trace usability.
+- Service tree search, filtering, structured payload forms, raw hex mode, project management, and trace usability.
 - Save and load project files.
 - Save and execute simple action sequences from the GUI.
 
@@ -556,8 +556,8 @@ The spike must verify:
 
 1. `someipy` can be installed and run on Windows x64.
 2. `someipyd` can be started and stopped by the application.
-3. UDP FF method works with `0x080D.json` `SecondStartCtrl`.
-4. TCP method works with `0x0F01.json` such as `AudioRecPopupReq`.
+3. UDP FF method availability and backend reporting are understood for `0x080D.json` `SecondStartCtrl`.
+4. TCP method availability and backend reporting are understood for `0x0F01.json` such as `AudioRecPopupReq`.
 5. UDP event works with `0x080E.json` `VehicleInfo`, including cycle publish and struct payload decode.
 6. TCP event works with `0x080A.json` or `0x0F01.json`.
 7. Field Getter/Notifier works with `0x080C.json` `VertHeiRmdSts`.
@@ -572,21 +572,21 @@ If a critical spike item fails, evaluate `vsomeip_py` or an internal SOME/IP sta
 ### MVP-1: Protocol Loop Closure
 
 - Windows x64 PySide application starts.
-- `ADC40_SOC/*.json` files import successfully.
+- The GUI can open a service definition directory and import `ADC40_SOC/*.json` files successfully.
 - Service, method, event, field, datatype, and deployment data are parsed.
 - Each service can be configured as Client or Server.
 - Role-based IP inference works and can be overridden.
 - Ports can be configured or overridden.
 - Services can start and stop.
-- UDP FF method call works.
-- TCP method call works.
-- UDP event subscription and cycle receive works.
+- Method actions record adapter status clearly. With the current `someipy` backend, FF method execution may be reported as `limited`.
+- RR method execution is gated until a proven fixture and adapter request/response path exist.
+- UDP event subscription and receive works for supported event definitions.
 - TCP event subscription and trigger publish works.
-- Field Getter and Notifier basic operations work.
+- Field Getter and Notifier basic operations work. Field Setter is gated until a supported fixture and adapter path exist.
 - At least two services can run concurrently.
 - Message Trace records TX/RX, service id, element id, transport, raw hex, and decoded payload.
 - Trace can export JSON and CSV.
-- Packaged Windows x64 app can run at least one method and one event scenario.
+- Packaged Windows x64 app can run at least one supported real backend scenario.
 
 ### MVP-2: GUI Efficiency
 
@@ -625,3 +625,5 @@ If a critical spike item fails, evaluate `vsomeip_py` or an internal SOME/IP sta
 - Full AUTOSAR ARXML import is not part of the first release.
 - Complex conditional assertions in action sequences are not part of the first release.
 - `someipy` is treated as the first backend, not a permanent hard dependency.
+- Current `someipy` method support is capability-gated: FF method paths may report `limited`, and RR method support is not accepted until proven by a fixture and adapter implementation.
+- Field Setter is not part of the accepted first-release backend capability until a supported JSON fixture and adapter path exist.

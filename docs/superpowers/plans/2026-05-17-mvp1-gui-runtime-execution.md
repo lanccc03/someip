@@ -1277,10 +1277,11 @@ Expected: only intentional files are modified, or the working tree is clean afte
 
 After this plan passes, the next plan should be one of these, in order:
 
-1. `mvp1-project-save-load` - persist runtime overrides, payload defaults, and imported service paths to JSON project files.
-2. `mvp1-gui-payload-forms` - replace JSON-only payload editing with structured widgets plus raw hex mode.
-3. `mvp1-real-someipy-gui-adapter` - add adapter selection and run the GUI through the formal `SomeipyAdapter` with explicit method limitations.
-4. `mvp1-packaging-smoke` - verify Windows x64 packaging with a method/event scenario.
+1. `mvp1-gui-definition-import` - add the user-facing File menu action for opening a JSON service definition directory.
+2. `mvp1-real-someipy-gui-adapter` - add adapter selection and run the GUI through the formal `SomeipyAdapter` with explicit method limitations.
+3. `mvp1-project-save-load` - persist runtime overrides, payload defaults, and imported service paths to JSON project files.
+4. `mvp1-gui-payload-forms` - replace JSON-only payload editing with structured widgets plus raw hex mode.
+5. `mvp1-packaging-smoke` - verify Windows x64 packaging with a supported real backend scenario.
 
 ## Self-Review
 

@@ -611,3 +611,68 @@ def test_main_window_locks_runtime_config_while_service_is_running(
     assert window.runtime_panel.role_combo.currentText() == Role.CLIENT.value
     window.service_tree.setCurrentItem(event_item)
     assert window.operation_panel.primary_button.text() == "Subscribe"
+
+
+def test_main_window_exposes_open_definition_directory_action(qtbot):
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    assert window.open_definition_directory_action.objectName() == "open_definition_directory_action"
+    assert window.open_definition_directory_action.text() == "Open Definition Directory..."
+
+    file_menu_actions = [
+        a for a in window.menuBar().actions()
+        if a.menu() is not None and a.text() == "&File"
+    ]
+    assert len(file_menu_actions) == 1
+    file_menu = file_menu_actions[0].menu()
+    assert "Open Definition Directory..." in [
+        action.text() for action in file_menu.actions()
+    ]
+
+
+def test_main_window_opens_definition_directory_from_action(qtbot, adc40_soc_dir):
+    selected_directories = []
+
+    def choose_directory(parent):
+        selected_directories.append(parent)
+        return adc40_soc_dir
+
+    window = MainWindow(definition_directory_dialog=choose_directory)
+    qtbot.addWidget(window)
+
+    window.open_definition_directory_action.trigger()
+
+    assert selected_directories == [window]
+    assert window.service_tree.topLevelItemCount() >= 5
+    assert "Loaded" in window.details.toPlainText()
+    assert str(adc40_soc_dir) in window.details.toPlainText()
+    assert "Loaded" in window.run_log_view.toPlainText()
+
+
+def test_main_window_open_definition_directory_cancel_is_noop(qtbot):
+    window = MainWindow(definition_directory_dialog=lambda parent: None)
+    qtbot.addWidget(window)
+
+    window.open_definition_directory_action.trigger()
+
+    assert window.service_tree.topLevelItemCount() == 0
+    assert window.run_log_view.toPlainText() == ""
+    assert window.problems_view.toPlainText() == ""
+
+
+def test_main_window_reports_definition_import_failure(qtbot, tmp_path):
+    broken_directory = tmp_path / "definitions"
+    broken_directory.mkdir()
+    (broken_directory / "broken.json").write_text("{", encoding="utf-8")
+
+    window = MainWindow(definition_directory_dialog=lambda parent: broken_directory)
+    qtbot.addWidget(window)
+
+    window.open_definition_directory_action.trigger()
+
+    assert window.service_tree.topLevelItemCount() == 0
+    assert "definition_import_failed" in window.problems_view.toPlainText()
+    assert str(broken_directory) in window.problems_view.toPlainText()
+    assert "definition_import_failed" in window.run_log_view.toPlainText()
+    assert "Failed to import service definitions" in window.details.toPlainText()

@@ -528,3 +528,40 @@ def test_main_window_calls_method_as_client(qtbot, adc40_soc_dir):
 
     assert "Method" in window.message_trace_view.toPlainText()
     assert "limited" in window.message_trace_view.toPlainText()
+
+
+def test_main_window_exposes_open_definition_directory_action(qtbot):
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    assert window.open_definition_directory_action.objectName() == "open_definition_directory_action"
+    assert window.open_definition_directory_action.text() == "Open Definition Directory..."
+
+    file_menu_actions = [
+        a for a in window.menuBar().actions()
+        if a.menu() is not None and a.text() == "&File"
+    ]
+    assert len(file_menu_actions) == 1
+    file_menu = file_menu_actions[0].menu()
+    assert "Open Definition Directory..." in [
+        action.text() for action in file_menu.actions()
+    ]
+
+
+def test_main_window_opens_definition_directory_from_action(qtbot, adc40_soc_dir):
+    selected_directories = []
+
+    def choose_directory(parent):
+        selected_directories.append(parent)
+        return adc40_soc_dir
+
+    window = MainWindow(definition_directory_dialog=choose_directory)
+    qtbot.addWidget(window)
+
+    window.open_definition_directory_action.trigger()
+
+    assert selected_directories == [window]
+    assert window.service_tree.topLevelItemCount() >= 5
+    assert "Loaded" in window.details.toPlainText()
+    assert str(adc40_soc_dir) in window.details.toPlainText()
+    assert "Loaded" in window.run_log_view.toPlainText()

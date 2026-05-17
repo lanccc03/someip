@@ -8,7 +8,9 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
+    QFileDialog,
     QMainWindow,
     QPlainTextEdit,
     QSplitter,
@@ -45,6 +47,18 @@ ITEM_PAYLOAD_ROLE = Qt.ItemDataRole.UserRole
 
 AsyncRunner = Callable[[Coroutine[Any, Any, None]], None]
 
+DefinitionDirectoryDialog = Callable[[QWidget], Path | None]
+
+
+def choose_definition_directory(parent: QWidget) -> Path | None:
+    directory = QFileDialog.getExistingDirectory(
+        parent,
+        "Open Service Definition Directory",
+    )
+    if not directory:
+        return None
+    return Path(directory)
+
 
 def schedule_async(awaitable: Coroutine[Any, Any, None]) -> None:
     asyncio.create_task(awaitable)
@@ -55,12 +69,16 @@ class MainWindow(QMainWindow):
         self,
         session: RuntimeSession | None = None,
         async_runner: AsyncRunner | None = None,
+        definition_directory_dialog: DefinitionDirectoryDialog | None = None,
     ) -> None:
         super().__init__()
         self.setWindowTitle("SOME/IP Test Tool")
         self._registry: ServiceRegistry | None = None
         self.session = session or RuntimeSession(MockSomeIpAdapter())
         self._async_runner = async_runner or schedule_async
+        self._definition_directory_dialog = (
+            definition_directory_dialog or choose_definition_directory
+        )
         self._running_service_ids: set[int] = set()
         self._runtime_drafts: dict[int, RuntimeServiceConfig] = {}
 
@@ -120,6 +138,28 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central_widget)
         self.statusBar().showMessage("Ready")
 
+        self._create_menus()
+
+    def _create_menus(self) -> None:
+        file_menu = self.menuBar().addMenu("&File")
+        self.open_definition_directory_action = QAction(
+            "Open Definition Directory...",
+            self,
+        )
+        self.open_definition_directory_action.setObjectName(
+            "open_definition_directory_action"
+        )
+        self.open_definition_directory_action.triggered.connect(
+            self.open_definition_directory
+        )
+        file_menu.addAction(self.open_definition_directory_action)
+
+    def open_definition_directory(self) -> None:
+        directory = self._definition_directory_dialog(self)
+        if directory is None:
+            return
+        self.load_service_directory(directory)
+
     def load_service_directory(self, directory: Path) -> None:
         self._registry = ServiceRegistry.load_directory(directory)
         self.service_tree.clear()
@@ -133,6 +173,15 @@ class MainWindow(QMainWindow):
         )
         self.details.setPlainText(message)
         self.statusBar().showMessage(message)
+        self.session.run_log.append(
+            RunLogEntry(
+                timestamp=datetime.now(timezone.utc),
+                level="info",
+                source="GUI",
+                message=message,
+            )
+        )
+        self._refresh_runtime_views()
 
     def _service_item(self, service: ServiceDefinition) -> QTreeWidgetItem:
         service_item = QTreeWidgetItem(

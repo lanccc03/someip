@@ -3,7 +3,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from someip_gui_tool.adapters.base import AdapterEvent, AdapterMethodResult, SomeIpAdapter
+from someip_gui_tool.adapters.base import (
+    AdapterEvent,
+    AdapterMethodResult,
+    AdapterStartConfig,
+    SomeIpAdapter,
+)
 from someip_gui_tool.codec.payload_codec import PayloadCodec
 from someip_gui_tool.core.runtime_config import (
     RuntimeProblem,
@@ -52,8 +57,46 @@ class RuntimeSession:
         if errors:
             problem_codes = ", ".join(problem.code for problem in errors)
             raise ValueError(f"Runtime config invalid: {problem_codes}")
+        adapter_config = _adapter_start_config(config)
         try:
-            await self.adapter.start_service(service)
+            await self.adapter.start_service(service, adapter_config)
+            if config.role is Role.SERVER:
+                await self.adapter.offer_service(service)
+                self._log(
+                    "info",
+                    "Core",
+                    f"Offered service {service.service_name} ({service.service_id_hex})",
+                    service_id=service.service_id_hex,
+                )
+            else:
+                found = await self.adapter.find_service(service)
+                if found:
+                    self._log(
+                        "info",
+                        "Core",
+                        f"Found service {service.service_name} ({service.service_id_hex})",
+                        service_id=service.service_id_hex,
+                    )
+                else:
+                    message = (
+                        f"Service {service.service_name} ({service.service_id_hex}) "
+                        "is not available after find-service polling."
+                    )
+                    self.problems.append(
+                        RuntimeProblem(
+                            code="find_service_unavailable",
+                            severity="warning",
+                            message=message,
+                            service_id=service.service_id,
+                        )
+                    )
+                    self._log(
+                        "warning",
+                        "Core",
+                        message,
+                        service_id=service.service_id_hex,
+                        error_detail="find_service_unavailable",
+                    )
         except Exception as exc:
             self._record_adapter_exception(
                 "start_service_adapter_exception",
@@ -883,6 +926,20 @@ class RuntimeSession:
 
     def _trace_generation(self, service: ServiceDefinition) -> int:
         return self._trace_generations.get(service.service_id, 0)
+
+
+def _adapter_start_config(config: RuntimeServiceConfig) -> AdapterStartConfig:
+    if config.server_port is None or config.client_port is None:
+        raise ValueError("Runtime config must have server_port and client_port after validation.")
+    return AdapterStartConfig(
+        role=config.role,
+        local_ip=config.local_ip,
+        server_port=config.server_port,
+        client_port=config.client_port,
+        multicast_ip=config.multicast_ip,
+        offer_ttl_s=config.offer_ttl_s or 0.0,
+        find_ttl_s=config.find_ttl_s or 0.0,
+    )
 
 
 def _eventgroup_hex(eventgroup_id: int | None) -> str | None:

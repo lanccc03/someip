@@ -1,7 +1,8 @@
 import pytest
 
-from someip_gui_tool.adapters.base import AdapterEvent
+from someip_gui_tool.adapters.base import AdapterEvent, AdapterStartConfig
 from someip_gui_tool.adapters.mock import MockSomeIpAdapter
+from someip_gui_tool.domain.enums import Role
 from someip_gui_tool.parsing.service_json import load_service_definition
 
 
@@ -112,6 +113,32 @@ async def test_mock_adapter_field_set_returns_error_without_setter(adc40_soc_dir
 
     assert result.status == "error"
     assert "setter" in result.detail
+
+
+@pytest.mark.asyncio
+async def test_mock_adapter_records_start_config(adc40_soc_dir):
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+    adapter = MockSomeIpAdapter()
+    config = AdapterStartConfig(
+        role=Role.SERVER,
+        local_ip="172.16.3.14/24",
+        server_port=30500,
+        client_port=30501,
+        multicast_ip="239.192.255.251",
+        offer_ttl_s=3.0,
+        find_ttl_s=3.0,
+    )
+
+    await adapter.start_service(service, config)
+
+    assert adapter.calls[-1].name == "start_service"
+    assert adapter.calls[-1].details == {
+        "service_id": service.service_id_hex,
+        "role": "Server",
+        "local_ip": "172.16.3.14/24",
+        "server_port": 30500,
+        "client_port": 30501,
+    }
 
 
 @pytest.mark.asyncio

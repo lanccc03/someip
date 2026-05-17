@@ -5,10 +5,23 @@ from dataclasses import replace
 
 import pytest
 
-from someip_gui_tool.adapters.base import SomeIpAdapter
+from someip_gui_tool.adapters.base import AdapterStartConfig, SomeIpAdapter
+from someip_gui_tool.domain.enums import Role
 from someip_gui_tool.adapters.someipy_adapter import SomeipyAdapter
 from someip_gui_tool.parsing.service_json import load_service_definition
 from tests.fakes_someipy_runtime import FakeSomeipyApi
+
+
+def _adapter_start_config(role: Role = Role.CLIENT) -> AdapterStartConfig:
+    return AdapterStartConfig(
+        role=role,
+        local_ip="127.0.0.1/24",
+        server_port=32000,
+        client_port=32001,
+        multicast_ip="239.192.255.251",
+        offer_ttl_s=3.0,
+        find_ttl_s=3.0,
+    )
 
 
 @pytest.mark.asyncio
@@ -393,3 +406,47 @@ async def test_someipy_adapter_shutdown_stops_active_offers(adc40_soc_dir) -> No
     await adapter.shutdown()
 
     assert api.servers[0].stop_awaited is True
+
+
+@pytest.mark.asyncio
+async def test_someipy_adapter_start_service_uses_configured_ports(adc40_soc_dir) -> None:
+    api = FakeSomeipyApi()
+    adapter = SomeipyAdapter(api=api, local_ip="127.0.0.1", base_port=31000)
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+
+    await adapter.start_service(service, _adapter_start_config(Role.CLIENT))
+
+    assert api.servers[0].endpoint_ip == "127.0.0.1"
+    assert api.clients[0].endpoint_ip == "127.0.0.1"
+    assert api.servers[0].endpoint_port == 32000
+    assert api.clients[0].endpoint_port == 32001
+    assert api.servers[0].start_awaited is False
+
+
+@pytest.mark.asyncio
+async def test_someipy_adapter_offer_service_starts_offer_after_configured_start(adc40_soc_dir) -> None:
+    api = FakeSomeipyApi()
+    adapter = SomeipyAdapter(api=api, local_ip="127.0.0.1", base_port=31000)
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+
+    await adapter.start_service(service, _adapter_start_config(Role.SERVER))
+    await adapter.offer_service(service)
+
+    assert len(api.servers) == 1
+    assert api.servers[0].endpoint_port == 32000
+    assert api.servers[0].start_awaited is True
+
+
+@pytest.mark.asyncio
+async def test_someipy_adapter_find_service_after_configured_start_uses_existing_client(adc40_soc_dir) -> None:
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+    api = FakeSomeipyApi(availability_sequences={service.service_id: [True]})
+    adapter = SomeipyAdapter(api=api, local_ip="127.0.0.1", base_port=31000)
+
+    await adapter.start_service(service, _adapter_start_config(Role.CLIENT))
+    result = await adapter.find_service(service)
+
+    assert result is True
+    assert len(api.clients) == 1
+    assert api.clients[0].endpoint_port == 32001
+    assert api.availability_calls[service.service_id] == 1

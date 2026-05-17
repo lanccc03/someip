@@ -52,7 +52,7 @@ class ErrorResultAdapter(MockSomeIpAdapter):
 
 
 class FailingAdapter(MockSomeIpAdapter):
-    async def start_service(self, service):
+    async def start_service(self, service, config=None):
         raise RuntimeError("adapter start failed")
 
     async def subscribe_eventgroup(self, service, eventgroup_id):
@@ -90,6 +90,7 @@ async def test_runtime_session_subscribes_and_publishes_event(adc40_soc_dir):
 
     assert [call.name for call in adapter.calls] == [
         "start_service",
+        "offer_service",
         "subscribe_eventgroup",
         "publish_event",
     ]
@@ -528,6 +529,75 @@ async def test_runtime_session_trace_callbacks_stop_and_reregister(adc40_soc_dir
     assert _rx_trace_count(session, "FieldNotifier") == field_rx_count + 1
     assert [call.name for call in adapter.calls].count("register_event_handler") == 2
     assert [call.name for call in adapter.calls].count("register_field_notifier_handler") == 2
+
+
+class UnavailableFindAdapter(MockSomeIpAdapter):
+    async def find_service(self, service):
+        await super().find_service(service)
+        return False
+
+
+@pytest.mark.asyncio
+async def test_runtime_session_server_start_offers_service(adc40_soc_dir):
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+    adapter = MockSomeIpAdapter()
+    session = RuntimeSession(adapter=adapter)
+
+    await session.start_service(service, _valid_config(service, Role.SERVER))
+
+    assert [call.name for call in adapter.calls] == [
+        "start_service",
+        "offer_service",
+    ]
+    assert adapter.calls[0].details["role"] == "Server"
+    assert adapter.calls[0].details["local_ip"] == service.deployment.server_ip
+    assert adapter.calls[0].details["server_port"] == 30500
+    assert adapter.calls[0].details["client_port"] == 30501
+    assert session.run_log[-2].message == (
+        f"Offered service {service.service_name} ({service.service_id_hex})"
+    )
+    assert session.run_log[-1].message == (
+        f"Started service {service.service_name} ({service.service_id_hex})"
+    )
+
+
+@pytest.mark.asyncio
+async def test_runtime_session_client_start_finds_service(adc40_soc_dir):
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+    adapter = MockSomeIpAdapter()
+    session = RuntimeSession(adapter=adapter)
+
+    await session.start_service(service, _valid_config(service, Role.CLIENT))
+
+    assert [call.name for call in adapter.calls] == [
+        "start_service",
+        "find_service",
+    ]
+    assert adapter.calls[0].details["role"] == "Client"
+    assert adapter.calls[0].details["local_ip"] == service.deployment.client_ip
+    assert session.run_log[-2].message == (
+        f"Found service {service.service_name} ({service.service_id_hex})"
+    )
+    assert session.run_log[-1].message == (
+        f"Started service {service.service_name} ({service.service_id_hex})"
+    )
+
+
+@pytest.mark.asyncio
+async def test_runtime_session_client_start_records_find_timeout_warning(adc40_soc_dir):
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+    session = RuntimeSession(adapter=UnavailableFindAdapter())
+
+    await session.start_service(service, _valid_config(service, Role.CLIENT))
+
+    assert session.problems[-1].code == "find_service_unavailable"
+    assert session.problems[-1].severity == "warning"
+    assert "not available" in session.problems[-1].message
+    assert session.run_log[-2].level == "warning"
+    assert session.run_log[-2].error_detail == "find_service_unavailable"
+    assert session.run_log[-1].message == (
+        f"Started service {service.service_name} ({service.service_id_hex})"
+    )
 
 
 def _rx_trace_count(session: RuntimeSession, element_type: str) -> int:

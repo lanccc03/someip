@@ -6,6 +6,7 @@ import sys
 from PySide6.QtWidgets import QApplication
 from qasync import QEventLoop
 
+from someip_gui_tool.gui.backend_factory import create_session
 from someip_gui_tool.gui.main_window import MainWindow
 from someip_gui_tool.gui.theme import apply_theme
 
@@ -15,7 +16,7 @@ def main() -> int:
     apply_theme(app)
     loop = QEventLoop(app)
     asyncio.set_event_loop(loop)
-    window = MainWindow()
+    window = MainWindow(session=create_session())
     window.show()
     with loop:
         loop.run_forever()

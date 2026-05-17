@@ -32,12 +32,12 @@ class OperationPanel(QGroupBox):
         layout.addWidget(self.primary_button)
         layout.addWidget(self.secondary_button)
 
-    def set_service_actions(self) -> None:
+    def set_service_actions(self, *, running: bool = False) -> None:
         self.title_label.setText("Select a method, event, or field")
         self.primary_button.setText("Start")
-        self.primary_button.setEnabled(True)
+        self.primary_button.setEnabled(not running)
         self.secondary_button.setText("Stop")
-        self.secondary_button.setEnabled(True)
+        self.secondary_button.setEnabled(running)
         self.payload_text.setPlainText("{}\n")
 
     def payload_values(self) -> dict[str, object]:

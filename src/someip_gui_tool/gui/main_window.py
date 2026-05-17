@@ -62,6 +62,7 @@ class MainWindow(QMainWindow):
         self.session = session or RuntimeSession(MockSomeIpAdapter())
         self._async_runner = async_runner or schedule_async
         self._running_service_ids: set[int] = set()
+        self._running_configs: dict[int, RuntimeServiceConfig] = {}
         self._runtime_drafts: dict[int, RuntimeServiceConfig] = {}
 
         self.service_tree = QTreeWidget()
@@ -180,14 +181,14 @@ class MainWindow(QMainWindow):
     ) -> None:
         previous_service = self._service_for_item(previous) if previous is not None else None
         current_service = self._service_for_item(current) if current is not None else None
-        if previous_service is not None:
+        if previous_service is not None and previous_service.service_id not in self._running_service_ids:
             self._save_runtime_draft(previous_service)
         if current_service is not None and (
             previous_service is None
             or previous_service.service_id != current_service.service_id
         ):
             self._set_runtime_config(current_service)
-        self._refresh_operation_panel(current)
+        self._refresh_selected_state()
 
     def _on_runtime_role_changed(self, role_text: str) -> None:
         current = self.service_tree.currentItem()
@@ -195,11 +196,21 @@ class MainWindow(QMainWindow):
             return
         service = self._service_for_item(current)
         if service is not None:
+            running_config = self._running_configs.get(service.service_id)
+            if running_config is not None:
+                if Role(role_text) is not running_config.role:
+                    self.runtime_panel.set_config(running_config)
+                self._refresh_selected_state()
+                return
             self._runtime_drafts.pop(service.service_id, None)
             self._set_runtime_config(service)
-        self._refresh_operation_panel(current)
+        self._refresh_selected_state()
 
     def _set_runtime_config(self, service: ServiceDefinition) -> None:
+        running_config = self._running_configs.get(service.service_id)
+        if running_config is not None:
+            self.runtime_panel.set_config(running_config)
+            return
         draft = self._runtime_drafts.get(service.service_id)
         if draft is not None and draft.role is Role(self.runtime_panel.role_combo.currentText()):
             self.runtime_panel.set_config(draft)
@@ -218,9 +229,12 @@ class MainWindow(QMainWindow):
             self.operation_panel.clear_selection()
             return
         payload = item.data(0, ITEM_PAYLOAD_ROLE)
+        service = self._service_for_item(item)
         role = Role(self.runtime_panel.role_combo.currentText())
         if isinstance(payload, ServiceDefinition):
-            self.operation_panel.set_service_actions()
+            self.operation_panel.set_service_actions(
+                running=payload.service_id in self._running_service_ids
+            )
         elif isinstance(payload, MethodDefinition):
             self.operation_panel.show_method(payload, role)
         elif isinstance(payload, EventDefinition):
@@ -229,6 +243,9 @@ class MainWindow(QMainWindow):
             self.operation_panel.show_field(payload, role)
         else:
             self.operation_panel.clear_selection()
+        self.runtime_panel.set_editing_enabled(
+            service is None or service.service_id not in self._running_service_ids
+        )
 
     def _on_primary_action(self) -> None:
         current = self.service_tree.currentItem()
@@ -270,14 +287,19 @@ class MainWindow(QMainWindow):
             self._record_gui_exception(exc, service)
         finally:
             self._refresh_runtime_views()
+            self._refresh_selected_state()
 
     async def _start_selected_service(self, service: ServiceDefinition) -> None:
-        await self.session.start_service(service, self.runtime_panel.config_for_service(service))
+        config = self.runtime_panel.config_for_service(service)
+        await self.session.start_service(service, config)
         self._running_service_ids.add(service.service_id)
+        self._running_configs[service.service_id] = config
 
     async def _stop_selected_service(self, service: ServiceDefinition) -> None:
+        self._require_service_running(service, service)
         await self.session.stop_service(service)
         self._running_service_ids.discard(service.service_id)
+        self._running_configs.pop(service.service_id, None)
 
     def _record_gui_exception(
         self,
@@ -323,6 +345,17 @@ class MainWindow(QMainWindow):
             "\n".join(f"{problem.severity}: {problem.code}: {problem.message}" for problem in self.session.problems)
         )
 
+    def _refresh_selected_state(self) -> None:
+        current = self.service_tree.currentItem()
+        if current is None:
+            self.runtime_panel.set_editing_enabled(True)
+            self.operation_panel.clear_selection()
+            return
+        service = self._service_for_item(current)
+        if service is not None and service.service_id in self._running_service_ids:
+            self.runtime_panel.set_config(self._running_configs[service.service_id])
+        self._refresh_operation_panel(current)
+
     def _service_for_item(self, item: QTreeWidgetItem) -> ServiceDefinition | None:
         cursor: QTreeWidgetItem | None = item
         while cursor is not None:
@@ -334,19 +367,21 @@ class MainWindow(QMainWindow):
 
     async def _run_primary_element_action(self, service: ServiceDefinition, payload: object) -> None:
         self._require_service_running(service, payload)
-        values = self.operation_panel.payload_values()
         role = self._current_role()
         if isinstance(payload, MethodDefinition):
             if role is not Role.CLIENT:
                 raise RuntimeError("Method call is only available in Client role.")
+            values = self.operation_panel.payload_values()
             await self.session.call_method(service, payload, values)
         elif isinstance(payload, EventDefinition):
             if role is Role.CLIENT:
                 await self.session.register_event_trace(service, payload)
                 await self.session.subscribe_event(service, payload)
             else:
+                values = self.operation_panel.payload_values()
                 await self.session.publish_event(service, payload, values)
         elif isinstance(payload, FieldDefinition):
+            values = self.operation_panel.payload_values()
             if role is Role.CLIENT:
                 await self.session.field_get(service, payload, values)
             else:
@@ -360,10 +395,19 @@ class MainWindow(QMainWindow):
         return Role(self.runtime_panel.role_combo.currentText())
 
     def _require_service_running(self, service: ServiceDefinition, payload: object) -> None:
-        if service.service_id in self._running_service_ids:
+        running_config = self._running_configs.get(service.service_id)
+        if running_config is not None:
+            current_role = self._current_role()
+            if running_config.role is not current_role:
+                raise RuntimeError(
+                    f"Service {service.service_name} is running as {running_config.role.value}; "
+                    f"stop it before switching to {current_role.value}."
+                )
             return
         if isinstance(payload, (MethodDefinition, EventDefinition, FieldDefinition)):
             target = f"{payload.__class__.__name__.replace('Definition', '')} {payload.name}"
+        elif isinstance(payload, ServiceDefinition):
+            target = f"service {payload.service_name}"
         else:
             target = "selected operation"
         raise RuntimeError(f"Start service before running {target}.")

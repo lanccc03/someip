@@ -388,6 +388,31 @@ def test_main_window_subscribes_event_as_client(qtbot, adc40_soc_dir):
     assert "publish_event" not in window.message_trace_view.toPlainText()
 
 
+def test_main_window_subscribe_ignores_payload_editor_json(qtbot, adc40_soc_dir):
+    window = MainWindow(async_runner=_run_immediate)
+    qtbot.addWidget(window)
+    window.load_service_directory(adc40_soc_dir)
+    event_item = window.service_tree.findItems(
+        "Event VehicleInfo",
+        Qt.MatchFlag.MatchContains | Qt.MatchFlag.MatchRecursive,
+    )[0]
+    service_item = event_item.parent()
+
+    window.service_tree.setCurrentItem(service_item)
+    window.runtime_panel.server_port_edit.setText("30500")
+    window.runtime_panel.client_port_edit.setText("30501")
+    qtbot.mouseClick(window.operation_panel.primary_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: "Started service" in window.run_log_view.toPlainText())
+
+    window.service_tree.setCurrentItem(event_item)
+    window.operation_panel.payload_text.setPlainText("{")
+    qtbot.mouseClick(window.operation_panel.primary_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: "Subscribed eventgroup" in window.run_log_view.toPlainText())
+
+    assert "Subscribed eventgroup" in window.run_log_view.toPlainText()
+    assert "payload_json_invalid" not in window.problems_view.toPlainText()
+
+
 def test_main_window_publishes_event_as_server(qtbot, adc40_soc_dir):
     window = MainWindow(async_runner=_run_immediate)
     qtbot.addWidget(window)
@@ -528,3 +553,61 @@ def test_main_window_calls_method_as_client(qtbot, adc40_soc_dir):
 
     assert "Method" in window.message_trace_view.toPlainText()
     assert "limited" in window.message_trace_view.toPlainText()
+
+
+def test_main_window_service_actions_follow_running_state(
+    qtbot: QtBot,
+    adc40_soc_dir,
+):
+    window = MainWindow(async_runner=_run_immediate)
+    qtbot.addWidget(window)
+    window.load_service_directory(adc40_soc_dir)
+    service_item = window.service_tree.topLevelItem(0)
+
+    window.service_tree.setCurrentItem(service_item)
+    assert window.operation_panel.primary_button.text() == "Start"
+    assert window.operation_panel.primary_button.isEnabled()
+    assert window.operation_panel.secondary_button.text() == "Stop"
+    assert not window.operation_panel.secondary_button.isEnabled()
+
+    window.runtime_panel.server_port_edit.setText("30500")
+    window.runtime_panel.client_port_edit.setText("30501")
+    qtbot.mouseClick(window.operation_panel.primary_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: "Started service" in window.run_log_view.toPlainText())
+
+    assert not window.operation_panel.primary_button.isEnabled()
+    assert window.operation_panel.secondary_button.isEnabled()
+
+    qtbot.mouseClick(window.operation_panel.secondary_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: "Stopped service" in window.run_log_view.toPlainText())
+
+    assert window.operation_panel.primary_button.isEnabled()
+    assert not window.operation_panel.secondary_button.isEnabled()
+
+
+def test_main_window_locks_runtime_config_while_service_is_running(
+    qtbot: QtBot,
+    adc40_soc_dir,
+):
+    window = MainWindow(async_runner=_run_immediate)
+    qtbot.addWidget(window)
+    window.load_service_directory(adc40_soc_dir)
+    service_item = window.service_tree.topLevelItem(0)
+    event_item = service_item.child(0)
+
+    window.service_tree.setCurrentItem(service_item)
+    window.runtime_panel.role_combo.setCurrentText(Role.CLIENT.value)
+    window.runtime_panel.server_port_edit.setText("30500")
+    window.runtime_panel.client_port_edit.setText("30501")
+    qtbot.mouseClick(window.operation_panel.primary_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: "Started service" in window.run_log_view.toPlainText())
+
+    assert not window.runtime_panel.role_combo.isEnabled()
+    assert not window.runtime_panel.server_port_edit.isEnabled()
+    assert not window.runtime_panel.client_port_edit.isEnabled()
+
+    window.runtime_panel.role_combo.setCurrentText(Role.SERVER.value)
+
+    assert window.runtime_panel.role_combo.currentText() == Role.CLIENT.value
+    window.service_tree.setCurrentItem(event_item)
+    assert window.operation_panel.primary_button.text() == "Subscribe"

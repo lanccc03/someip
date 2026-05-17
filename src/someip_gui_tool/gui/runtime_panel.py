@@ -60,3 +60,14 @@ class RuntimePanel(QGroupBox):
             client_port=_optional_port(self.client_port_edit.text(), "Client port"),
             multicast_ip=self.multicast_ip_edit.text().strip(),
         )
+
+    def set_editing_enabled(self, enabled: bool) -> None:
+        for widget in (
+            self.role_combo,
+            self.local_ip_edit,
+            self.remote_ip_edit,
+            self.server_port_edit,
+            self.client_port_edit,
+            self.multicast_ip_edit,
+        ):
+            widget.setEnabled(enabled)

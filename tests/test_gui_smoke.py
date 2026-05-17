@@ -362,3 +362,169 @@ def test_main_window_keeps_runtime_edits_when_selecting_child_item(
 
     assert window.runtime_panel.server_port_edit.text() == "30500"
     assert window.runtime_panel.client_port_edit.text() == "30501"
+
+
+def test_main_window_subscribes_event_as_client(qtbot, adc40_soc_dir):
+    window = MainWindow(async_runner=_run_immediate)
+    qtbot.addWidget(window)
+    window.load_service_directory(adc40_soc_dir)
+    event_item = window.service_tree.findItems(
+        "Event VehicleInfo",
+        Qt.MatchFlag.MatchContains | Qt.MatchFlag.MatchRecursive,
+    )[0]
+    service_item = event_item.parent()
+
+    window.service_tree.setCurrentItem(service_item)
+    window.runtime_panel.server_port_edit.setText("30500")
+    window.runtime_panel.client_port_edit.setText("30501")
+    qtbot.mouseClick(window.operation_panel.primary_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: "Started service" in window.run_log_view.toPlainText())
+
+    window.service_tree.setCurrentItem(event_item)
+    qtbot.mouseClick(window.operation_panel.primary_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: "Subscribed eventgroup" in window.run_log_view.toPlainText())
+
+    assert "Subscribed eventgroup" in window.run_log_view.toPlainText()
+    assert "publish_event" not in window.message_trace_view.toPlainText()
+
+
+def test_main_window_publishes_event_as_server(qtbot, adc40_soc_dir):
+    window = MainWindow(async_runner=_run_immediate)
+    qtbot.addWidget(window)
+    window.load_service_directory(adc40_soc_dir)
+    event_item = window.service_tree.findItems(
+        "Event VehicleInfo",
+        Qt.MatchFlag.MatchContains | Qt.MatchFlag.MatchRecursive,
+    )[0]
+    service_item = event_item.parent()
+
+    window.service_tree.setCurrentItem(service_item)
+    window.runtime_panel.role_combo.setCurrentText(Role.SERVER.value)
+    window.runtime_panel.server_port_edit.setText("30500")
+    window.runtime_panel.client_port_edit.setText("30501")
+    qtbot.mouseClick(window.operation_panel.primary_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: "Started service" in window.run_log_view.toPlainText())
+
+    window.service_tree.setCurrentItem(event_item)
+    assert window.operation_panel.primary_button.text() == "Publish"
+    qtbot.mouseClick(window.operation_panel.primary_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: "VehicleInfo" in window.message_trace_view.toPlainText())
+
+    assert "Published event VehicleInfo" in window.run_log_view.toPlainText()
+    assert "VehicleInfo" in window.message_trace_view.toPlainText()
+    assert "raw_payload_hex" in window.message_trace_view.toPlainText()
+
+
+def test_main_window_reports_element_operation_before_service_start(qtbot, adc40_soc_dir):
+    window = MainWindow(async_runner=_run_immediate)
+    qtbot.addWidget(window)
+    window.load_service_directory(adc40_soc_dir)
+    event_item = window.service_tree.findItems(
+        "Event VehicleInfo",
+        Qt.MatchFlag.MatchContains | Qt.MatchFlag.MatchRecursive,
+    )[0]
+
+    window.service_tree.setCurrentItem(event_item)
+    qtbot.mouseClick(window.operation_panel.primary_button, Qt.MouseButton.LeftButton)
+
+    assert "service_not_started" in window.problems_view.toPlainText()
+    assert "Start service before running Event VehicleInfo" in window.problems_view.toPlainText()
+
+
+def test_main_window_reports_invalid_payload_json(qtbot, adc40_soc_dir):
+    window = MainWindow(async_runner=_run_immediate)
+    qtbot.addWidget(window)
+    window.load_service_directory(adc40_soc_dir)
+    event_item = window.service_tree.findItems(
+        "Event VehicleInfo",
+        Qt.MatchFlag.MatchContains | Qt.MatchFlag.MatchRecursive,
+    )[0]
+    service_item = event_item.parent()
+
+    window.service_tree.setCurrentItem(service_item)
+    window.runtime_panel.role_combo.setCurrentText(Role.SERVER.value)
+    window.runtime_panel.server_port_edit.setText("30500")
+    window.runtime_panel.client_port_edit.setText("30501")
+    qtbot.mouseClick(window.operation_panel.primary_button, Qt.MouseButton.LeftButton)
+
+    window.service_tree.setCurrentItem(event_item)
+    window.operation_panel.payload_text.setPlainText("{")
+    qtbot.mouseClick(window.operation_panel.primary_button, Qt.MouseButton.LeftButton)
+
+    assert "payload_json_invalid" in window.problems_view.toPlainText()
+    assert "Payload JSON is invalid" in window.problems_view.toPlainText()
+
+
+def test_main_window_gets_field_as_client(qtbot, adc40_soc_dir):
+    window = MainWindow(async_runner=_run_immediate)
+    qtbot.addWidget(window)
+    window.load_service_directory(adc40_soc_dir)
+    field_item = window.service_tree.findItems(
+        "Field VertHeiRmdSts",
+        Qt.MatchFlag.MatchContains | Qt.MatchFlag.MatchRecursive,
+    )[0]
+    service_item = field_item.parent()
+
+    window.service_tree.setCurrentItem(service_item)
+    window.runtime_panel.server_port_edit.setText("30500")
+    window.runtime_panel.client_port_edit.setText("30501")
+    qtbot.mouseClick(window.operation_panel.primary_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: "Started service" in window.run_log_view.toPlainText())
+
+    window.service_tree.setCurrentItem(field_item)
+    qtbot.mouseClick(window.operation_panel.primary_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: "VertHeiRmdSts" in window.message_trace_view.toPlainText())
+
+    assert "Field getter VertHeiRmdSts" in window.run_log_view.toPlainText()
+    assert "FieldGetter" in window.message_trace_view.toPlainText()
+
+
+def test_main_window_notifies_field_as_server(qtbot, adc40_soc_dir):
+    window = MainWindow(async_runner=_run_immediate)
+    qtbot.addWidget(window)
+    window.load_service_directory(adc40_soc_dir)
+    field_item = window.service_tree.findItems(
+        "Field VertHeiRmdSts",
+        Qt.MatchFlag.MatchContains | Qt.MatchFlag.MatchRecursive,
+    )[0]
+    service_item = field_item.parent()
+
+    window.service_tree.setCurrentItem(service_item)
+    window.runtime_panel.role_combo.setCurrentText(Role.SERVER.value)
+    window.runtime_panel.server_port_edit.setText("30500")
+    window.runtime_panel.client_port_edit.setText("30501")
+    qtbot.mouseClick(window.operation_panel.primary_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: "Started service" in window.run_log_view.toPlainText())
+
+    window.service_tree.setCurrentItem(field_item)
+    assert window.operation_panel.primary_button.text() == "Notify"
+    qtbot.mouseClick(window.operation_panel.primary_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: "VertHeiRmdSts" in window.message_trace_view.toPlainText())
+
+    assert "Field notifier VertHeiRmdSts" in window.run_log_view.toPlainText()
+    assert "FieldNotifier" in window.message_trace_view.toPlainText()
+
+
+def test_main_window_calls_method_as_client(qtbot, adc40_soc_dir):
+    window = MainWindow(async_runner=_run_immediate)
+    qtbot.addWidget(window)
+    window.load_service_directory(adc40_soc_dir)
+    method_item = window.service_tree.findItems(
+        "Method SecondStartCtrl",
+        Qt.MatchFlag.MatchContains | Qt.MatchFlag.MatchRecursive,
+    )[0]
+    service_item = method_item.parent()
+
+    window.service_tree.setCurrentItem(service_item)
+    window.runtime_panel.server_port_edit.setText("30500")
+    window.runtime_panel.client_port_edit.setText("30501")
+    qtbot.mouseClick(window.operation_panel.primary_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: "Started service" in window.run_log_view.toPlainText())
+
+    window.service_tree.setCurrentItem(method_item)
+    assert window.operation_panel.primary_button.text() == "Call"
+    qtbot.mouseClick(window.operation_panel.primary_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: "Called method SecondStartCtrl" in window.run_log_view.toPlainText())
+
+    assert "Method" in window.message_trace_view.toPlainText()
+    assert "limited" in window.message_trace_view.toPlainText()

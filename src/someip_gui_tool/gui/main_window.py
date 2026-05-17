@@ -331,3 +331,39 @@ class MainWindow(QMainWindow):
                 return payload
             cursor = cursor.parent()
         return None
+
+    async def _run_primary_element_action(self, service: ServiceDefinition, payload: object) -> None:
+        self._require_service_running(service, payload)
+        values = self.operation_panel.payload_values()
+        role = self._current_role()
+        if isinstance(payload, MethodDefinition):
+            if role is not Role.CLIENT:
+                raise RuntimeError("Method call is only available in Client role.")
+            await self.session.call_method(service, payload, values)
+        elif isinstance(payload, EventDefinition):
+            if role is Role.CLIENT:
+                await self.session.register_event_trace(service, payload)
+                await self.session.subscribe_event(service, payload)
+            else:
+                await self.session.publish_event(service, payload, values)
+        elif isinstance(payload, FieldDefinition):
+            if role is Role.CLIENT:
+                await self.session.field_get(service, payload, values)
+            else:
+                await self.session.field_notify(service, payload, values)
+
+    async def _run_secondary_element_action(self, service: ServiceDefinition, payload: object) -> None:
+        self._require_service_running(service, payload)
+        raise RuntimeError("Secondary action is disabled for the current MVP-1 GUI slice.")
+
+    def _current_role(self) -> Role:
+        return Role(self.runtime_panel.role_combo.currentText())
+
+    def _require_service_running(self, service: ServiceDefinition, payload: object) -> None:
+        if service.service_id in self._running_service_ids:
+            return
+        if isinstance(payload, (MethodDefinition, EventDefinition, FieldDefinition)):
+            target = f"{payload.__class__.__name__.replace('Definition', '')} {payload.name}"
+        else:
+            target = "selected operation"
+        raise RuntimeError(f"Start service before running {target}.")

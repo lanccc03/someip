@@ -4,12 +4,24 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from someip_gui_tool.domain.enums import Role
 from someip_gui_tool.domain.models import (
     EventDefinition,
     FieldDefinition,
     MethodDefinition,
     ServiceDefinition,
 )
+
+
+@dataclass(frozen=True)
+class AdapterStartConfig:
+    role: Role
+    local_ip: str
+    server_port: int
+    client_port: int
+    multicast_ip: str
+    offer_ttl_s: float
+    find_ttl_s: float
 
 
 @dataclass(frozen=True)
@@ -32,7 +44,11 @@ EventHandler = Callable[[AdapterEvent], None]
 
 class SomeIpAdapter(ABC):
     @abstractmethod
-    async def start_service(self, service: ServiceDefinition) -> None:
+    async def start_service(
+        self,
+        service: ServiceDefinition,
+        config: AdapterStartConfig | None = None,
+    ) -> None:
         raise NotImplementedError
 
     @abstractmethod

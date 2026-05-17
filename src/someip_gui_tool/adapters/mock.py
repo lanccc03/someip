@@ -7,6 +7,7 @@ from types import MappingProxyType
 from someip_gui_tool.adapters.base import (
     AdapterEvent,
     AdapterMethodResult,
+    AdapterStartConfig,
     EventHandler,
     SomeIpAdapter,
 )
@@ -34,8 +35,22 @@ class MockSomeIpAdapter(SomeIpAdapter):
         self._event_handlers: dict[tuple[int, int], list[EventHandler]] = {}
         self._subscribed_eventgroups: set[tuple[int, int]] = set()
 
-    async def start_service(self, service: ServiceDefinition) -> None:
-        self.calls.append(AdapterCall("start_service", {"service_id": service.service_id_hex}))
+    async def start_service(
+        self,
+        service: ServiceDefinition,
+        config: AdapterStartConfig | None = None,
+    ) -> None:
+        details: dict[str, object] = {"service_id": service.service_id_hex}
+        if config is not None:
+            details.update(
+                {
+                    "role": config.role.value,
+                    "local_ip": config.local_ip,
+                    "server_port": config.server_port,
+                    "client_port": config.client_port,
+                }
+            )
+        self.calls.append(AdapterCall("start_service", details))
 
     async def stop_service(self, service: ServiceDefinition) -> None:
         self.calls.append(AdapterCall("stop_service", {"service_id": service.service_id_hex}))

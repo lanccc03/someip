@@ -1,7 +1,12 @@
+import asyncio
+from collections.abc import Coroutine
+from typing import Any
+
 import json
 
 import pytest
 from PySide6.QtCore import Qt
+from pytestqt.qtbot import QtBot
 
 from someip_gui_tool.core.runtime_config import infer_runtime_config
 from someip_gui_tool.domain.enums import Role
@@ -17,6 +22,14 @@ def _top_level_labels(window):
 
 def _child_labels(item):
     return [item.child(index).text(0) for index in range(item.childCount())]
+
+
+def _run_immediate(awaitable: Coroutine[Any, Any, None]) -> None:
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(awaitable)
+    finally:
+        loop.close()
 
 
 def test_main_window_loads_services(qtbot, adc40_soc_dir):
@@ -295,3 +308,57 @@ def test_operation_panel_disables_method_response_configuration(qtbot, adc40_soc
     assert not window.operation_panel.primary_button.isEnabled()
     assert window.operation_panel.secondary_button.text() == "Configure Response"
     assert not window.operation_panel.secondary_button.isEnabled()
+
+
+def test_main_window_reports_invalid_runtime_config_in_problems(qtbot: QtBot, adc40_soc_dir):
+    window = MainWindow(async_runner=_run_immediate)
+    qtbot.addWidget(window)
+    window.load_service_directory(adc40_soc_dir)
+    service_item = window.service_tree.topLevelItem(0)
+
+    window.service_tree.setCurrentItem(service_item)
+    window.runtime_panel.server_port_edit.setText("abc")
+    window.runtime_panel.client_port_edit.setText("30501")
+    qtbot.mouseClick(window.operation_panel.primary_button, Qt.MouseButton.LeftButton)
+
+    assert "runtime_config_invalid" in window.problems_view.toPlainText()
+    assert "Server port must be an integer" in window.problems_view.toPlainText()
+    assert "GUI" in window.run_log_view.toPlainText()
+
+
+def test_main_window_starts_and_stops_selected_service(qtbot: QtBot, adc40_soc_dir):
+    window = MainWindow(async_runner=_run_immediate)
+    qtbot.addWidget(window)
+    window.load_service_directory(adc40_soc_dir)
+    service_item = window.service_tree.topLevelItem(0)
+
+    window.service_tree.setCurrentItem(service_item)
+    window.runtime_panel.server_port_edit.setText("30500")
+    window.runtime_panel.client_port_edit.setText("30501")
+    qtbot.mouseClick(window.operation_panel.primary_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: "Started service" in window.run_log_view.toPlainText())
+
+    qtbot.mouseClick(window.operation_panel.secondary_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: "Stopped service" in window.run_log_view.toPlainText())
+
+    assert "Started service" in window.run_log_view.toPlainText()
+    assert "Stopped service" in window.run_log_view.toPlainText()
+
+
+def test_main_window_keeps_runtime_edits_when_selecting_child_item(
+    qtbot: QtBot,
+    adc40_soc_dir,
+):
+    window = MainWindow(async_runner=_run_immediate)
+    qtbot.addWidget(window)
+    window.load_service_directory(adc40_soc_dir)
+    service_item = window.service_tree.topLevelItem(0)
+    child_item = service_item.child(0)
+
+    window.service_tree.setCurrentItem(service_item)
+    window.runtime_panel.server_port_edit.setText("30500")
+    window.runtime_panel.client_port_edit.setText("30501")
+    window.service_tree.setCurrentItem(child_item)
+
+    assert window.runtime_panel.server_port_edit.text() == "30500"
+    assert window.runtime_panel.client_port_edit.text() == "30501"

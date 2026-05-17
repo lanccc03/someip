@@ -367,19 +367,21 @@ class MainWindow(QMainWindow):
 
     async def _run_primary_element_action(self, service: ServiceDefinition, payload: object) -> None:
         self._require_service_running(service, payload)
-        values = self.operation_panel.payload_values()
         role = self._current_role()
         if isinstance(payload, MethodDefinition):
             if role is not Role.CLIENT:
                 raise RuntimeError("Method call is only available in Client role.")
+            values = self.operation_panel.payload_values()
             await self.session.call_method(service, payload, values)
         elif isinstance(payload, EventDefinition):
             if role is Role.CLIENT:
                 await self.session.register_event_trace(service, payload)
                 await self.session.subscribe_event(service, payload)
             else:
+                values = self.operation_panel.payload_values()
                 await self.session.publish_event(service, payload, values)
         elif isinstance(payload, FieldDefinition):
+            values = self.operation_panel.payload_values()
             if role is Role.CLIENT:
                 await self.session.field_get(service, payload, values)
             else:

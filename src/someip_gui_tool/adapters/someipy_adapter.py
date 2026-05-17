@@ -11,6 +11,7 @@ from typing import Any
 from someip_gui_tool.adapters.base import (
     AdapterEvent,
     AdapterMethodResult,
+    AdapterStartConfig,
     EventHandler,
     SomeIpAdapter,
 )
@@ -31,6 +32,10 @@ _CYCLIC_OFFER_DELAY_MS = 1000
 _CLIENT_ID_BASE = 0x1000
 FIND_AVAILABILITY_ATTEMPTS = 3
 FIND_AVAILABILITY_DELAY_S = 0.05
+
+
+def _endpoint_host(ip_address: str) -> str:
+    return ip_address.split("/", 1)[0]
 
 
 @dataclass
@@ -66,9 +71,14 @@ class SomeipyAdapter(SomeIpAdapter):
         self._service_runtimes: dict[int, _SomeipyServiceRuntime] = {}
         self._next_service_index = 0
 
-    async def start_service(self, service: ServiceDefinition) -> None:
-        runtime = await self._runtime_for_service(service)
-        await _maybe_await(runtime.server.start_offer())
+    async def start_service(
+        self,
+        service: ServiceDefinition,
+        config: AdapterStartConfig | None = None,
+    ) -> None:
+        runtime = await self._runtime_for_service(service, config)
+        if config is None:
+            await _maybe_await(runtime.server.start_offer())
 
     async def stop_service(self, service: ServiceDefinition) -> None:
         runtime = self._service_runtimes.get(service.service_id)
@@ -78,7 +88,8 @@ class SomeipyAdapter(SomeIpAdapter):
         self._clear_service_handlers(service.service_id)
 
     async def offer_service(self, service: ServiceDefinition) -> None:
-        await self.start_service(service)
+        runtime = await self._runtime_for_service(service)
+        await _maybe_await(runtime.server.start_offer())
 
     async def find_service(self, service: ServiceDefinition) -> bool:
         runtime = await self._runtime_for_service(service)
@@ -333,7 +344,11 @@ class SomeipyAdapter(SomeIpAdapter):
 
         return handler_factory
 
-    async def _runtime_for_service(self, service: ServiceDefinition) -> _SomeipyServiceRuntime:
+    async def _runtime_for_service(
+        self,
+        service: ServiceDefinition,
+        config: AdapterStartConfig | None = None,
+    ) -> _SomeipyServiceRuntime:
         runtime = self._service_runtimes.get(service.service_id)
         if runtime is not None:
             return runtime
@@ -350,13 +365,19 @@ class SomeipyAdapter(SomeIpAdapter):
         mapped_service = factory.build_service(service)
         service_index = self._next_service_index
         self._next_service_index += 1
-        endpoint_port = self._base_port + service_index * _PORT_STRIDE
-        client_port = endpoint_port + 1
+        if config is None:
+            endpoint_ip = self._local_ip
+            endpoint_port = self._base_port + service_index * _PORT_STRIDE
+            client_port = endpoint_port + 1
+        else:
+            endpoint_ip = _endpoint_host(config.local_ip)
+            endpoint_port = config.server_port
+            client_port = config.client_port
         server = api.ServerServiceInstance(
             daemon=daemon,
             service=mapped_service,
             instance_id=service.deployment.instance_id,
-            endpoint_ip=self._local_ip,
+            endpoint_ip=endpoint_ip,
             endpoint_port=endpoint_port,
             ttl=int(service.deployment.offer_ttl_s),
             cyclic_offer_delay_ms=_CYCLIC_OFFER_DELAY_MS,
@@ -365,7 +386,7 @@ class SomeipyAdapter(SomeIpAdapter):
             daemon=daemon,
             service=mapped_service,
             instance_id=service.deployment.instance_id,
-            endpoint_ip=self._local_ip,
+            endpoint_ip=endpoint_ip,
             endpoint_port=client_port,
             client_id=_CLIENT_ID_BASE + service_index,
         )

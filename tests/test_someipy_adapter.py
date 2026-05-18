@@ -31,6 +31,28 @@ def _adapter_start_config(
     )
 
 
+class _FakeSdSocket:
+    def __init__(self, sent_packets: list[tuple[bytes, tuple[str, int]]] | None = None) -> None:
+        self.sent_packets = sent_packets
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        return None
+
+    def setsockopt(self, *args):
+        return None
+
+    def bind(self, address):
+        self.bound_address = address
+
+    def sendto(self, payload, address):
+        if self.sent_packets is not None:
+            self.sent_packets.append((payload, address))
+        return len(payload)
+
+
 @pytest.mark.asyncio
 async def test_someipy_adapter_connects_with_client_config(adc40_soc_dir) -> None:
     api = FakeSomeipyApi()
@@ -90,12 +112,48 @@ async def test_someipy_adapter_reports_ff_method_limited(adc40_soc_dir) -> None:
 async def test_someipy_adapter_find_service_polls_client_availability(adc40_soc_dir) -> None:
     service = load_service_definition(adc40_soc_dir / "0x080E.json")
     api = FakeSomeipyApi(availability_sequences={service.service_id: [False, True]})
-    adapter = SomeipyAdapter(api=api, local_ip="127.0.0.1", base_port=31000)
+    adapter = SomeipyAdapter(
+        api=api,
+        local_ip="127.0.0.1",
+        base_port=31000,
+        sd_socket_factory=_FakeSdSocket,
+    )
 
     result = await adapter.find_service(service)
 
     assert result is True
     assert api.availability_calls[service.service_id] == 2
+
+
+@pytest.mark.asyncio
+async def test_someipy_adapter_find_service_sends_sd_find_before_polling(
+    adc40_soc_dir,
+) -> None:
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+    api = FakeSomeipyApi(availability_sequences={service.service_id: [False]})
+    sent_packets: list[tuple[bytes, tuple[str, int]]] = []
+
+    adapter = SomeipyAdapter(
+        api=api,
+        local_ip="127.0.0.1",
+        base_port=31000,
+        sd_socket_factory=lambda: _FakeSdSocket(sent_packets),
+    )
+
+    await adapter.start_service(service, _adapter_start_config(Role.CLIENT))
+    result = await adapter.find_service(service)
+
+    assert result is False
+    assert len(sent_packets) == 1
+    payload, address = sent_packets[0]
+    assert address == ("239.192.255.251", 30490)
+    assert payload[0:4] == bytes.fromhex("ffff8100")
+    assert payload[20:24] == bytes.fromhex("00000010")
+    assert payload[24] == 0x00
+    assert payload[28:30] == service.service_id.to_bytes(2, "big")
+    assert payload[30:32] == service.deployment.instance_id.to_bytes(2, "big")
+    assert payload[32] == service.deployment.major_version
+    assert payload[36:40] == service.deployment.minor_version.to_bytes(4, "big")
 
 
 def test_someipy_adapter_is_someip_adapter_implementation() -> None:
@@ -448,7 +506,12 @@ async def test_someipy_adapter_offer_service_starts_offer_after_configured_start
 async def test_someipy_adapter_find_service_after_configured_start_uses_existing_client(adc40_soc_dir) -> None:
     service = load_service_definition(adc40_soc_dir / "0x080E.json")
     api = FakeSomeipyApi(availability_sequences={service.service_id: [True]})
-    adapter = SomeipyAdapter(api=api, local_ip="127.0.0.1", base_port=31000)
+    adapter = SomeipyAdapter(
+        api=api,
+        local_ip="127.0.0.1",
+        base_port=31000,
+        sd_socket_factory=_FakeSdSocket,
+    )
 
     await adapter.start_service(service, _adapter_start_config(Role.CLIENT))
     result = await adapter.find_service(service)
@@ -465,7 +528,12 @@ async def test_someipy_adapter_configured_start_replaces_unconfigured_runtime(
 ) -> None:
     service = load_service_definition(adc40_soc_dir / "0x080E.json")
     api = FakeSomeipyApi(availability_sequences={service.service_id: [True]})
-    adapter = SomeipyAdapter(api=api, local_ip="127.0.0.1", base_port=31000)
+    adapter = SomeipyAdapter(
+        api=api,
+        local_ip="127.0.0.1",
+        base_port=31000,
+        sd_socket_factory=_FakeSdSocket,
+    )
 
     await adapter.find_service(service)
     await adapter.start_service(service, _adapter_start_config(Role.CLIENT))

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import socket
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,6 +33,7 @@ _CYCLIC_OFFER_DELAY_MS = 1000
 _CLIENT_ID_BASE = 0x1000
 FIND_AVAILABILITY_ATTEMPTS = 3
 FIND_AVAILABILITY_DELAY_S = 0.05
+SD_PORT = 30490
 
 
 def _endpoint_host(ip_address: str) -> str:
@@ -60,12 +62,15 @@ class SomeipyAdapter(SomeIpAdapter):
         base_port: int,
         start_daemon: bool = False,
         daemon_work_dir: Path | None = None,
+        sd_socket_factory: Any | None = None,
     ) -> None:
         self._api = api
         self._local_ip = local_ip
         self._base_port = base_port
         self._start_daemon = start_daemon
         self._daemon_work_dir = daemon_work_dir
+        self._sd_socket_factory = sd_socket_factory
+        self._sd_session_id = 0
         self._owned_daemon_process: SomeipydProcess | None = None
         self._owned_temp_dir: tempfile.TemporaryDirectory[str] | None = None
         self._daemon: Any | None = None
@@ -96,6 +101,7 @@ class SomeipyAdapter(SomeIpAdapter):
 
     async def find_service(self, service: ServiceDefinition) -> bool:
         runtime = await self._runtime_for_service(service)
+        self._send_find_service_request(service, runtime)
         for attempt in range(FIND_AVAILABILITY_ATTEMPTS):
             if bool(await _maybe_await(runtime.client.is_available())):
                 return True
@@ -203,6 +209,44 @@ class SomeipyAdapter(SomeIpAdapter):
                 payload,
             )
         )
+
+    def _send_find_service_request(
+        self,
+        service: ServiceDefinition,
+        runtime: _SomeipyServiceRuntime,
+    ) -> None:
+        from someipy._internal._sd.deserialization.sd_serialization import (
+            serialize_sd_message,
+        )
+        from someipy._internal._sd.entries.find_service_entry import FindServiceEntry
+        from someipy._internal._sd.sd_message import SdMessage
+
+        config = runtime.start_config
+        local_ip = _endpoint_host(config.local_ip) if config is not None else self._local_ip
+        multicast_ip = config.multicast_ip if config is not None else "239.192.255.251"
+
+        self._sd_session_id = (self._sd_session_id % 0xFFFF) + 1
+        sd_message = SdMessage()
+        sd_message.session_id = self._sd_session_id
+        sd_message.reboot_flag = False
+        sd_message.entries.append(
+            FindServiceEntry(
+                service_id=service.service_id,
+                instance_id=service.deployment.instance_id,
+                major_version=service.deployment.major_version,
+                minor_version=service.deployment.minor_version,
+            )
+        )
+        payload = serialize_sd_message(sd_message)
+
+        socket_factory = self._sd_socket_factory
+        if socket_factory is None:
+            socket_factory = lambda: socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        with socket_factory() as sd_socket:
+            sd_socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 1)
+            sd_socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(local_ip))
+            sd_socket.bind((local_ip, 0))
+            sd_socket.sendto(payload, (multicast_ip, SD_PORT))
 
     def _adapter_method_result(self, result: Any, success_detail: str) -> AdapterMethodResult:
         payload = getattr(result, "payload", None)

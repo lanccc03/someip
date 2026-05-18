@@ -96,6 +96,7 @@ class MainWindow(QMainWindow):
         self.operation_panel = OperationPanel()
         self.operation_panel.primary_button.clicked.connect(self._on_primary_action)
         self.operation_panel.secondary_button.clicked.connect(self._on_secondary_action)
+        self.operation_panel.tertiary_button.clicked.connect(self._on_tertiary_action)
 
         self.details = QPlainTextEdit()
         self.details.setReadOnly(True)
@@ -532,7 +533,32 @@ class MainWindow(QMainWindow):
 
     async def _run_secondary_element_action(self, service: ServiceDefinition, payload: object) -> None:
         self._require_service_running(service, payload)
+        role = self._current_role()
+        if isinstance(payload, EventDefinition):
+            if role is Role.CLIENT:
+                await self.session.unsubscribe_event(service, payload)
+                return
+            values = self.operation_panel.payload_values()
+            await self.session.start_cycle_event(service, payload, values)
+            return
         raise RuntimeError("Secondary action is disabled for the current MVP-1 GUI slice.")
+
+    async def _run_tertiary_element_action(self, service: ServiceDefinition, payload: object) -> None:
+        self._require_service_running(service, payload)
+        role = self._current_role()
+        if isinstance(payload, EventDefinition) and role is Role.SERVER:
+            await self.session.stop_cycle_event(service, payload)
+            return
+        raise RuntimeError("Tertiary action is disabled for the current MVP-1 GUI slice.")
+
+    def _on_tertiary_action(self) -> None:
+        current = self.service_tree.currentItem()
+        if current is None:
+            return
+        payload = current.data(0, ITEM_PAYLOAD_ROLE)
+        service = self._service_for_item(current)
+        if service is not None:
+            self._run_async(self._run_tertiary_element_action(service, payload), service)
 
     def _current_role(self) -> Role:
         return Role(self.runtime_panel.role_combo.currentText())

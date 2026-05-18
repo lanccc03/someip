@@ -233,9 +233,9 @@ def test_operation_panel_shows_default_payload_for_client_event(qtbot, adc40_soc
     window.service_tree.setCurrentItem(event_items[0])
 
     assert window.operation_panel.primary_button.text() == "Subscribe"
-    assert window.operation_panel.secondary_button.text() == "Publish"
+    assert window.operation_panel.secondary_button.text() == "Unsubscribe"
     assert window.operation_panel.primary_button.isEnabled()
-    assert not window.operation_panel.secondary_button.isEnabled()
+    assert window.operation_panel.secondary_button.isEnabled()
     assert json.loads(window.operation_panel.payload_text.toPlainText()) == {
         "VehicleInfo": {"VehicleSpeed": 0.0, "Odometer": 0.0}
     }
@@ -255,10 +255,10 @@ def test_operation_panel_enables_publish_for_server_event(qtbot, adc40_soc_dir):
     window.runtime_panel.role_combo.setCurrentText(Role.SERVER.value)
     window.service_tree.setCurrentItem(event_items[0])
 
-    assert window.operation_panel.primary_button.text() == "Publish"
+    assert window.operation_panel.primary_button.text() == "Publish Once"
     assert window.operation_panel.primary_button.isEnabled()
-    assert window.operation_panel.secondary_button.text() == "Subscribe"
-    assert not window.operation_panel.secondary_button.isEnabled()
+    assert window.operation_panel.secondary_button.text() == "Start Cycle"
+    assert window.operation_panel.secondary_button.isEnabled()
 
 
 def test_operation_panel_uses_field_role_actions(qtbot, adc40_soc_dir):
@@ -433,7 +433,7 @@ def test_main_window_publishes_event_as_server(qtbot, adc40_soc_dir):
     qtbot.waitUntil(lambda: "Started service" in window.run_log_view.toPlainText())
 
     window.service_tree.setCurrentItem(event_item)
-    assert window.operation_panel.primary_button.text() == "Publish"
+    assert window.operation_panel.primary_button.text() == "Publish Once"
     qtbot.mouseClick(window.operation_panel.primary_button, Qt.MouseButton.LeftButton)
     qtbot.waitUntil(lambda: "VehicleInfo" in window.message_trace_view.toPlainText())
 
@@ -770,3 +770,65 @@ def test_runtime_panel_preserves_deployment_ttls_when_reading_config(
 
     assert config.offer_ttl_s == service.deployment.offer_ttl_s
     assert config.find_ttl_s == service.deployment.find_ttl_s
+
+
+def test_main_window_unsubscribes_event_as_client(qtbot, adc40_soc_dir):
+    window = MainWindow(async_runner=_run_immediate)
+    qtbot.addWidget(window)
+    window.load_service_directory(adc40_soc_dir)
+    service_item = window.service_tree.topLevelItem(0)
+    event_item = service_item.child(0)
+
+    window.service_tree.setCurrentItem(service_item)
+    window.runtime_panel.role_combo.setCurrentText(Role.CLIENT.value)
+    window.runtime_panel.server_port_edit.setText("30500")
+    window.runtime_panel.client_port_edit.setText("30501")
+    qtbot.mouseClick(window.operation_panel.primary_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: "Started service" in window.run_log_view.toPlainText())
+
+    window.service_tree.setCurrentItem(event_item)
+    qtbot.mouseClick(window.operation_panel.primary_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: "Subscribed eventgroup" in window.run_log_view.toPlainText())
+    qtbot.mouseClick(window.operation_panel.secondary_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: "Unsubscribed eventgroup" in window.run_log_view.toPlainText())
+
+    assert "Unsubscribed eventgroup" in window.run_log_view.toPlainText()
+
+
+def test_main_window_starts_and_stops_cycle_event_as_server(qtbot, adc40_soc_dir):
+    _cycle_loop = asyncio.new_event_loop()
+
+    def _run_cycle(awaitable):
+        _cycle_loop.run_until_complete(awaitable)
+
+    window = MainWindow(async_runner=_run_cycle)
+    qtbot.addWidget(window)
+    window.load_service_directory(adc40_soc_dir)
+    service_item = None
+    event_item = None
+    for index in range(window.service_tree.topLevelItemCount()):
+        candidate = window.service_tree.topLevelItem(index)
+        if "0x080E" in candidate.text(0):
+            service_item = candidate
+            event_item = candidate.child(0)
+            break
+    assert service_item is not None
+    assert event_item is not None
+
+    window.service_tree.setCurrentItem(service_item)
+    window.runtime_panel.role_combo.setCurrentText(Role.SERVER.value)
+    window.runtime_panel.server_port_edit.setText("30500")
+    window.runtime_panel.client_port_edit.setText("30501")
+    qtbot.mouseClick(window.operation_panel.primary_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: "Started service" in window.run_log_view.toPlainText())
+
+    window.service_tree.setCurrentItem(event_item)
+    assert window.operation_panel.primary_button.text() == "Publish Once"
+    assert window.operation_panel.secondary_button.text() == "Start Cycle"
+    assert window.operation_panel.tertiary_button.text() == "Stop Cycle"
+    qtbot.mouseClick(window.operation_panel.secondary_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: "Started cycle event VehicleInfo" in window.run_log_view.toPlainText())
+    qtbot.mouseClick(window.operation_panel.tertiary_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: "Stopped cycle event VehicleInfo" in window.run_log_view.toPlainText())
+
+    _cycle_loop.close()

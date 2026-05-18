@@ -22,6 +22,7 @@ class OperationPanel(QGroupBox):
         self.primary_button = QPushButton("Start")
         self.primary_button.setProperty("primary", True)
         self.secondary_button = QPushButton("Stop")
+        self.tertiary_button = QPushButton("Stop Cycle")
         self.payload_text = QPlainTextEdit()
         self.payload_text.setObjectName("payload_text")
         self.payload_text.setPlaceholderText("Payload JSON")
@@ -31,6 +32,7 @@ class OperationPanel(QGroupBox):
         layout.addWidget(self.payload_text)
         layout.addWidget(self.primary_button)
         layout.addWidget(self.secondary_button)
+        layout.addWidget(self.tertiary_button)
 
     def set_service_actions(self, *, running: bool = False) -> None:
         self.title_label.setText("Select a method, event, or field")
@@ -38,6 +40,8 @@ class OperationPanel(QGroupBox):
         self.primary_button.setEnabled(not running)
         self.secondary_button.setText("Stop")
         self.secondary_button.setEnabled(running)
+        self.tertiary_button.setText("Stop Cycle")
+        self.tertiary_button.setEnabled(False)
         self.payload_text.setPlainText("{}\n")
 
     def payload_values(self) -> dict[str, object]:
@@ -52,6 +56,8 @@ class OperationPanel(QGroupBox):
         self.primary_button.setEnabled(False)
         self.secondary_button.setText("Stop")
         self.secondary_button.setEnabled(False)
+        self.tertiary_button.setText("Stop Cycle")
+        self.tertiary_button.setEnabled(False)
         self.payload_text.setPlainText("{}\n")
 
     def show_method(self, method: MethodDefinition, role: Role) -> None:
@@ -64,6 +70,8 @@ class OperationPanel(QGroupBox):
             self.primary_button.setEnabled(False)
         self.secondary_button.setText("Configure Response")
         self.secondary_button.setEnabled(False)
+        self.tertiary_button.setText("Stop Cycle")
+        self.tertiary_button.setEnabled(False)
         self.payload_text.setPlainText(payload_values_json(method.parameters))
 
     def show_event(self, event: EventDefinition, role: Role) -> None:
@@ -71,13 +79,17 @@ class OperationPanel(QGroupBox):
         if role is Role.CLIENT:
             self.primary_button.setText("Subscribe")
             self.primary_button.setEnabled(True)
-            self.secondary_button.setText("Publish")
-            self.secondary_button.setEnabled(False)
+            self.secondary_button.setText("Unsubscribe")
+            self.secondary_button.setEnabled(True)
+            self.tertiary_button.setText("Stop Cycle")
+            self.tertiary_button.setEnabled(False)
         else:
-            self.primary_button.setText("Publish")
+            self.primary_button.setText("Publish Once")
             self.primary_button.setEnabled(True)
-            self.secondary_button.setText("Subscribe")
-            self.secondary_button.setEnabled(False)
+            self.secondary_button.setText("Start Cycle")
+            self.secondary_button.setEnabled(event.cycle_time_s is not None)
+            self.tertiary_button.setText("Stop Cycle")
+            self.tertiary_button.setEnabled(event.cycle_time_s is not None)
         self.payload_text.setPlainText(payload_values_json(event.parameters))
 
     def show_field(self, field: FieldDefinition, role: Role) -> None:
@@ -97,4 +109,6 @@ class OperationPanel(QGroupBox):
             parameters = field.getter.parameters
         elif role is Role.SERVER and field.notifier is not None:
             parameters = field.notifier.parameters
+        self.tertiary_button.setText("Stop Cycle")
+        self.tertiary_button.setEnabled(False)
         self.payload_text.setPlainText(payload_values_json(parameters))

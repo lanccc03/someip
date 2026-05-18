@@ -229,6 +229,29 @@ class RuntimeSession:
     async def subscribe_event(self, service: ServiceDefinition, event: EventDefinition) -> None:
         if event.eventgroup_id is None:
             raise ValueError(f"Event {event.name!r} has no eventgroup id")
+        found = await self.adapter.find_service(service)
+        if not found:
+            message = (
+                f"Subscription for eventgroup 0x{event.eventgroup_id:04X} "
+                f"for {event.name} is pending because service "
+                f"{service.service_name} ({service.service_id_hex}) is not available yet."
+            )
+            self.problems.append(
+                RuntimeProblem(
+                    code="subscription_pending_service_unavailable",
+                    severity="warning",
+                    message=message,
+                    service_id=service.service_id,
+                )
+            )
+            self._log(
+                "warning",
+                "Core",
+                message,
+                service_id=service.service_id_hex,
+                element_id=event.event_id_hex,
+                error_detail="subscription_pending_service_unavailable",
+            )
         try:
             await self.adapter.subscribe_eventgroup(service, event.eventgroup_id)
         except Exception as exc:
@@ -243,7 +266,7 @@ class RuntimeSession:
         self._log(
             "info",
             "Core",
-            f"Subscribed eventgroup 0x{event.eventgroup_id:04X} for {event.name}",
+            f"Requested subscription for eventgroup 0x{event.eventgroup_id:04X} for {event.name}",
             service_id=service.service_id_hex,
             element_id=event.event_id_hex,
         )
@@ -265,7 +288,7 @@ class RuntimeSession:
         self._log(
             "info",
             "Core",
-            f"Unsubscribed eventgroup 0x{event.eventgroup_id:04X} for {event.name}",
+            f"Requested unsubscribe for eventgroup 0x{event.eventgroup_id:04X} for {event.name}",
             service_id=service.service_id_hex,
             element_id=event.event_id_hex,
         )

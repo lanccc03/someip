@@ -384,9 +384,9 @@ def test_main_window_subscribes_event_as_client(qtbot, adc40_soc_dir):
 
     window.service_tree.setCurrentItem(event_item)
     qtbot.mouseClick(window.operation_panel.primary_button, Qt.MouseButton.LeftButton)
-    qtbot.waitUntil(lambda: "Subscribed eventgroup" in window.run_log_view.toPlainText())
+    qtbot.waitUntil(lambda: "Requested subscription for eventgroup" in window.run_log_view.toPlainText())
 
-    assert "Subscribed eventgroup" in window.run_log_view.toPlainText()
+    assert "Requested subscription for eventgroup" in window.run_log_view.toPlainText()
     assert "publish_event" not in window.message_trace_view.toPlainText()
 
 
@@ -409,9 +409,9 @@ def test_main_window_subscribe_ignores_payload_editor_json(qtbot, adc40_soc_dir)
     window.service_tree.setCurrentItem(event_item)
     window.operation_panel.payload_text.setPlainText("{")
     qtbot.mouseClick(window.operation_panel.primary_button, Qt.MouseButton.LeftButton)
-    qtbot.waitUntil(lambda: "Subscribed eventgroup" in window.run_log_view.toPlainText())
+    qtbot.waitUntil(lambda: "Requested subscription for eventgroup" in window.run_log_view.toPlainText())
 
-    assert "Subscribed eventgroup" in window.run_log_view.toPlainText()
+    assert "Requested subscription for eventgroup" in window.run_log_view.toPlainText()
     assert "payload_json_invalid" not in window.problems_view.toPlainText()
 
 
@@ -788,11 +788,11 @@ def test_main_window_unsubscribes_event_as_client(qtbot, adc40_soc_dir):
 
     window.service_tree.setCurrentItem(event_item)
     qtbot.mouseClick(window.operation_panel.primary_button, Qt.MouseButton.LeftButton)
-    qtbot.waitUntil(lambda: "Subscribed eventgroup" in window.run_log_view.toPlainText())
+    qtbot.waitUntil(lambda: "Requested subscription for eventgroup" in window.run_log_view.toPlainText())
     qtbot.mouseClick(window.operation_panel.secondary_button, Qt.MouseButton.LeftButton)
-    qtbot.waitUntil(lambda: "Unsubscribed eventgroup" in window.run_log_view.toPlainText())
+    qtbot.waitUntil(lambda: "Requested unsubscribe for eventgroup" in window.run_log_view.toPlainText())
 
-    assert "Unsubscribed eventgroup" in window.run_log_view.toPlainText()
+    assert "Requested unsubscribe for eventgroup" in window.run_log_view.toPlainText()
 
 
 def test_main_window_starts_and_stops_cycle_event_as_server(qtbot, adc40_soc_dir):
@@ -904,7 +904,7 @@ def test_main_window_exports_trace_and_run_log(qtbot, adc40_soc_dir, tmp_path):
     qtbot.waitUntil(lambda: "Started service" in window.run_log_view.toPlainText())
     window.service_tree.setCurrentItem(event_item)
     qtbot.mouseClick(window.operation_panel.primary_button, Qt.MouseButton.LeftButton)
-    qtbot.waitUntil(lambda: "Subscribed eventgroup" in window.run_log_view.toPlainText())
+    qtbot.waitUntil(lambda: "Requested subscription for eventgroup" in window.run_log_view.toPlainText())
 
     window.export_trace_csv_action.trigger()
     window.export_trace_json_action.trigger()

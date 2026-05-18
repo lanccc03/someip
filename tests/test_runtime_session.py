@@ -62,6 +62,12 @@ class CaptureStartConfigAdapter(MockSomeIpAdapter):
         await super().start_service(service, config)
 
 
+class UnavailableFindAdapter(MockSomeIpAdapter):
+    async def find_service(self, service):
+        await super().find_service(service)
+        return False
+
+
 class FailingAdapter(MockSomeIpAdapter):
     async def start_service(self, service, config=None):
         raise RuntimeError("adapter start failed")
@@ -105,12 +111,13 @@ async def test_runtime_session_subscribes_and_publishes_event(adc40_soc_dir):
     assert [call.name for call in adapter.calls] == [
         "start_service",
         "offer_service",
+        "find_service",
         "subscribe_eventgroup",
         "publish_event",
     ]
     assert [entry.message for entry in session.run_log][-3:] == [
         f"Started service {service.service_name} ({service.service_id_hex})",
-        "Subscribed eventgroup 0x0001 for VehicleInfo",
+        "Requested subscription for eventgroup 0x0001 for VehicleInfo",
         "Published event VehicleInfo payload=4148000042c68000",
     ]
     assert session.trace[-1].raw_payload_hex == "4148000042c68000"
@@ -698,7 +705,43 @@ async def test_runtime_session_unsubscribes_event(adc40_soc_dir):
         "unsubscribe_eventgroup",
     ]
     assert session.run_log[-1].message == (
-        f"Unsubscribed eventgroup 0x{event.eventgroup_id:04X} for {event.name}"
+        f"Requested unsubscribe for eventgroup 0x{event.eventgroup_id:04X} for {event.name}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_runtime_session_subscribe_refreshes_discovery_before_request(adc40_soc_dir):
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+    event = service.events[0]
+    adapter = MockSomeIpAdapter()
+    session = RuntimeSession(adapter=adapter)
+
+    await session.start_service(service, _valid_config(service, Role.CLIENT))
+    await session.subscribe_event(service, event)
+
+    assert [call.name for call in adapter.calls][-2:] == [
+        "find_service",
+        "subscribe_eventgroup",
+    ]
+    assert session.run_log[-1].message == (
+        f"Requested subscription for eventgroup 0x{event.eventgroup_id:04X} for {event.name}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_runtime_session_subscribe_warns_when_service_unavailable(adc40_soc_dir):
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+    event = service.events[0]
+    adapter = UnavailableFindAdapter()
+    session = RuntimeSession(adapter=adapter)
+
+    await session.start_service(service, _valid_config(service, Role.CLIENT))
+    await session.subscribe_event(service, event)
+
+    assert session.problems[-1].code == "subscription_pending_service_unavailable"
+    assert "pending" in session.run_log[-2].message.lower()
+    assert session.run_log[-1].message == (
+        f"Requested subscription for eventgroup 0x{event.eventgroup_id:04X} for {event.name}"
     )
 
 

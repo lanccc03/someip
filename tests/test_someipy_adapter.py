@@ -450,3 +450,43 @@ async def test_someipy_adapter_find_service_after_configured_start_uses_existing
     assert len(api.clients) == 1
     assert api.clients[0].endpoint_port == 32001
     assert api.availability_calls[service.service_id] == 1
+
+
+@pytest.mark.asyncio
+async def test_someipy_adapter_configured_start_replaces_unconfigured_runtime(
+    adc40_soc_dir,
+) -> None:
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+    api = FakeSomeipyApi(availability_sequences={service.service_id: [True]})
+    adapter = SomeipyAdapter(api=api, local_ip="127.0.0.1", base_port=31000)
+
+    await adapter.find_service(service)
+    await adapter.start_service(service, _adapter_start_config(Role.CLIENT))
+
+    assert len(api.servers) == 2
+    assert len(api.clients) == 2
+    assert api.servers[0].endpoint_port == 31000
+    assert api.clients[0].endpoint_port == 31001
+    assert api.servers[0].stop_awaited is True
+    assert api.servers[1].endpoint_port == 32000
+    assert api.clients[1].endpoint_port == 32001
+    assert adapter._service_runtimes[service.service_id].endpoint_port == 32000
+    assert adapter._service_runtimes[service.service_id].client_port == 32001
+
+
+@pytest.mark.asyncio
+async def test_someipy_adapter_repeated_configured_start_reuses_matching_runtime(
+    adc40_soc_dir,
+) -> None:
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+    api = FakeSomeipyApi()
+    adapter = SomeipyAdapter(api=api, local_ip="127.0.0.1", base_port=31000)
+    config = _adapter_start_config(Role.CLIENT)
+
+    await adapter.start_service(service, config)
+    await adapter.start_service(service, config)
+
+    assert len(api.servers) == 1
+    assert len(api.clients) == 1
+    assert api.servers[0].endpoint_port == 32000
+    assert api.clients[0].endpoint_port == 32001

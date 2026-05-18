@@ -81,6 +81,7 @@ class MainWindow(QMainWindow):
         )
         self._running_service_ids: set[int] = set()
         self._running_configs: dict[int, RuntimeServiceConfig] = {}
+        self._service_items: dict[int, QTreeWidgetItem] = {}
         self._runtime_drafts: dict[int, RuntimeServiceConfig] = {}
 
         self.service_tree = QTreeWidget()
@@ -172,6 +173,7 @@ class MainWindow(QMainWindow):
     def load_service_directory(self, directory: Path) -> None:
         self._registry = ServiceRegistry.load_directory(directory)
         self.service_tree.clear()
+        self._service_items.clear()
 
         for service in self._registry.services:
             self.service_tree.addTopLevelItem(self._service_item(service))
@@ -213,6 +215,9 @@ class MainWindow(QMainWindow):
         for field in service.fields:
             service_item.addChild(self._field_item(field))
 
+        self._service_items[service.service_id] = service_item
+        self._refresh_service_item_label(service)
+
         return service_item
 
     def _field_item(self, field: FieldDefinition) -> QTreeWidgetItem:
@@ -231,6 +236,38 @@ class MainWindow(QMainWindow):
 
         return field_item
 
+    def _refresh_service_item_label(self, service: ServiceDefinition) -> None:
+        item = self._service_items.get(service.service_id)
+        if item is None:
+            return
+        role = self._display_role_for_service(service)
+        state = "Running" if service.service_id in self._running_service_ids else "Stopped"
+        item.setText(
+            0,
+            (
+                f"{service.service_name} ({service.service_id_hex}) "
+                f"[Role: {role.value}; State: {state}]"
+            ),
+        )
+
+    def _refresh_all_service_item_labels(self) -> None:
+        if self._registry is None:
+            return
+        for service in self._registry.services:
+            self._refresh_service_item_label(service)
+
+    def _display_role_for_service(self, service: ServiceDefinition) -> Role:
+        running_config = self._running_configs.get(service.service_id)
+        if running_config is not None:
+            return running_config.role
+        draft = self._runtime_drafts.get(service.service_id)
+        if draft is not None:
+            return draft.role
+        current = self.service_tree.currentItem()
+        if current is not None and self._service_for_item(current) is service:
+            return Role(self.runtime_panel.role_combo.currentText())
+        return Role.CLIENT
+
     def _on_current_item_changed(
         self,
         current: QTreeWidgetItem | None,
@@ -245,6 +282,7 @@ class MainWindow(QMainWindow):
             or previous_service.service_id != current_service.service_id
         ):
             self._set_runtime_config(current_service)
+        self._refresh_all_service_item_labels()
         self._refresh_selected_state()
 
     def _on_runtime_role_changed(self, role_text: str) -> None:
@@ -257,10 +295,12 @@ class MainWindow(QMainWindow):
             if running_config is not None:
                 if Role(role_text) is not running_config.role:
                     self.runtime_panel.set_config(running_config)
+                self._refresh_all_service_item_labels()
                 self._refresh_selected_state()
                 return
             self._runtime_drafts.pop(service.service_id, None)
             self._set_runtime_config(service)
+        self._refresh_all_service_item_labels()
         self._refresh_selected_state()
 
     def _set_runtime_config(self, service: ServiceDefinition) -> None:
@@ -351,12 +391,14 @@ class MainWindow(QMainWindow):
         await self.session.start_service(service, config)
         self._running_service_ids.add(service.service_id)
         self._running_configs[service.service_id] = config
+        self._refresh_service_item_label(service)
 
     async def _stop_selected_service(self, service: ServiceDefinition) -> None:
         self._require_service_running(service, service)
         await self.session.stop_service(service)
         self._running_service_ids.discard(service.service_id)
         self._running_configs.pop(service.service_id, None)
+        self._refresh_service_item_label(service)
 
     def _record_gui_exception(
         self,

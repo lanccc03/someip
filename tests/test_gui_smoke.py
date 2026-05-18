@@ -716,6 +716,44 @@ def test_main_window_blocks_definition_import_while_services_run(
     assert window.operation_panel.secondary_button.isEnabled()
 
 
+def test_main_window_service_tree_shows_role_and_state(qtbot, adc40_soc_dir):
+    window = MainWindow(async_runner=_run_immediate)
+    qtbot.addWidget(window)
+    window.load_service_directory(adc40_soc_dir)
+    service_item = window.service_tree.topLevelItem(0)
+
+    window.service_tree.setCurrentItem(service_item)
+
+    assert "Role: Client" in service_item.text(0)
+    assert "State: Stopped" in service_item.text(0)
+
+    window.runtime_panel.role_combo.setCurrentText(Role.SERVER.value)
+
+    assert "Role: Server" in service_item.text(0)
+    assert "State: Stopped" in service_item.text(0)
+
+
+def test_main_window_service_tree_state_changes_on_start_and_stop(qtbot, adc40_soc_dir):
+    window = MainWindow(async_runner=_run_immediate)
+    qtbot.addWidget(window)
+    window.load_service_directory(adc40_soc_dir)
+    service_item = window.service_tree.topLevelItem(0)
+
+    window.service_tree.setCurrentItem(service_item)
+    window.runtime_panel.server_port_edit.setText("30500")
+    window.runtime_panel.client_port_edit.setText("30501")
+
+    qtbot.mouseClick(window.operation_panel.primary_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: "Started service" in window.run_log_view.toPlainText())
+
+    assert "State: Running" in service_item.text(0)
+
+    qtbot.mouseClick(window.operation_panel.secondary_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: "Stopped service" in window.run_log_view.toPlainText())
+
+    assert "State: Stopped" in service_item.text(0)
+
+
 def test_runtime_panel_preserves_deployment_ttls_when_reading_config(
     qtbot,
     adc40_soc_dir,

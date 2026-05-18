@@ -47,6 +47,8 @@ class _SomeipyServiceRuntime:
     client_port: int
     active_eventgroups: set[int]
     start_config: AdapterStartConfig | None
+    offer_ttl_s: float
+    find_ttl_s: float
 
 
 class SomeipyAdapter(SomeIpAdapter):
@@ -138,7 +140,7 @@ class SomeipyAdapter(SomeIpAdapter):
         await _maybe_await(
             runtime.client.subscribe_eventgroup(
                 eventgroup,
-                ttl_subscription_seconds=int(service.deployment.find_ttl_s),
+                ttl_subscription_seconds=int(runtime.find_ttl_s),
             )
         )
         runtime.active_eventgroups.add(eventgroup_id)
@@ -248,7 +250,7 @@ class SomeipyAdapter(SomeIpAdapter):
             finally:
                 self._stop_owned_daemon_process()
 
-    async def _ensure_daemon(self) -> Any:
+    async def _ensure_daemon(self, config: AdapterStartConfig | None = None) -> Any:
         if self._daemon is not None:
             return self._daemon
 
@@ -261,28 +263,37 @@ class SomeipyAdapter(SomeIpAdapter):
                 api = SomeipyApiProbe().require_module()
                 self._api = api
 
+            daemon_ip = self._local_ip if config is None else _endpoint_host(config.local_ip)
+            sd_address = (
+                "239.192.255.251"
+                if config is None
+                else config.multicast_ip
+            )
+
             if self._start_daemon and self._owned_daemon_process is None:
                 work_dir = self._daemon_work_dir
                 if work_dir is None:
                     self._owned_temp_dir = tempfile.TemporaryDirectory(prefix="someipyd-adapter-")
                     work_dir = Path(self._owned_temp_dir.name)
-                config = SomeipydConfig(
-                    interface=self._local_ip,
-                    tcp_host=self._local_ip,
+                daemon_config = SomeipydConfig(
+                    interface=daemon_ip,
+                    sd_address=sd_address,
+                    tcp_host=daemon_ip,
                     tcp_port=self._base_port,
                 )
                 self._owned_daemon_process = SomeipydProcess.start(
-                    config=config,
+                    config=daemon_config,
                     work_dir=work_dir,
                 )
 
-            config = SomeipydConfig(
-                interface=self._local_ip,
-                tcp_host=self._local_ip,
+            daemon_config = SomeipydConfig(
+                interface=daemon_ip,
+                sd_address=sd_address,
+                tcp_host=daemon_ip,
                 tcp_port=self._base_port,
             ).client_config()
             try:
-                self._daemon = await api.connect_to_someipy_daemon(config)
+                self._daemon = await api.connect_to_someipy_daemon(daemon_config)
             except Exception:
                 self._stop_owned_daemon_process()
                 raise
@@ -357,7 +368,7 @@ class SomeipyAdapter(SomeIpAdapter):
             await _maybe_await(runtime.server.stop_offer())
             self._service_runtimes.pop(service.service_id, None)
 
-        daemon = await self._ensure_daemon()
+        daemon = await self._ensure_daemon(config)
         api = self._api
         if api is None:
             raise RuntimeError("someipy API was not initialized")
@@ -373,17 +384,21 @@ class SomeipyAdapter(SomeIpAdapter):
             endpoint_ip = self._local_ip
             endpoint_port = self._base_port + service_index * _PORT_STRIDE
             client_port = endpoint_port + 1
+            offer_ttl_s = service.deployment.offer_ttl_s
+            find_ttl_s = service.deployment.find_ttl_s
         else:
             endpoint_ip = _endpoint_host(config.local_ip)
             endpoint_port = config.server_port
             client_port = config.client_port
+            offer_ttl_s = config.offer_ttl_s
+            find_ttl_s = config.find_ttl_s
         server = api.ServerServiceInstance(
             daemon=daemon,
             service=mapped_service,
             instance_id=service.deployment.instance_id,
             endpoint_ip=endpoint_ip,
             endpoint_port=endpoint_port,
-            ttl=int(service.deployment.offer_ttl_s),
+            ttl=int(offer_ttl_s),
             cyclic_offer_delay_ms=_CYCLIC_OFFER_DELAY_MS,
         )
         client = api.ClientServiceInstance(
@@ -405,6 +420,8 @@ class SomeipyAdapter(SomeIpAdapter):
             client_port=client_port,
             active_eventgroups=set(),
             start_config=config,
+            offer_ttl_s=offer_ttl_s,
+            find_ttl_s=find_ttl_s,
         )
         self._service_runtimes[service.service_id] = runtime
         return runtime

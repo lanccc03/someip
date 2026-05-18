@@ -11,6 +11,8 @@ from pytestqt.qtbot import QtBot
 from someip_gui_tool.core.runtime_config import infer_runtime_config
 from someip_gui_tool.domain.enums import Role
 from someip_gui_tool.gui.main_window import MainWindow
+from someip_gui_tool.gui.runtime_panel import RuntimePanel
+from someip_gui_tool.parsing.service_json import load_service_definition
 
 
 def _top_level_labels(window):
@@ -712,3 +714,21 @@ def test_main_window_blocks_definition_import_while_services_run(
     assert window.service_tree.topLevelItemCount() == original_top_level_count
     assert not window.operation_panel.primary_button.isEnabled()
     assert window.operation_panel.secondary_button.isEnabled()
+
+
+def test_runtime_panel_preserves_deployment_ttls_when_reading_config(
+    qtbot,
+    adc40_soc_dir,
+) -> None:
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+    panel = RuntimePanel()
+    qtbot.addWidget(panel)
+
+    panel.set_config(infer_runtime_config(service, Role.CLIENT))
+    panel.server_port_edit.setText("30500")
+    panel.client_port_edit.setText("30501")
+
+    config = panel.config_for_service(service)
+
+    assert config.offer_ttl_s == service.deployment.offer_ttl_s
+    assert config.find_ttl_s == service.deployment.find_ttl_s

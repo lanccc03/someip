@@ -875,3 +875,43 @@ def test_operation_panel_marks_field_setter_gated(qtbot, adc40_soc_dir):
     window.service_tree.setCurrentItem(field_item)
 
     assert "setter unavailable" in window.operation_panel.status_label.text().lower()
+
+
+def test_main_window_exports_trace_and_run_log(qtbot, adc40_soc_dir, tmp_path):
+    exports = [
+        tmp_path / "trace.csv",
+        tmp_path / "trace.json",
+        tmp_path / "run-log.txt",
+        tmp_path / "run-log.json",
+    ]
+
+    def save_file_dialog(parent, title, suggested_name, file_filter):
+        return exports.pop(0)
+
+    window = MainWindow(
+        async_runner=_run_immediate,
+        save_file_dialog=save_file_dialog,
+    )
+    qtbot.addWidget(window)
+    window.load_service_directory(adc40_soc_dir)
+    service_item = window.service_tree.topLevelItem(0)
+    event_item = service_item.child(0)
+
+    window.service_tree.setCurrentItem(service_item)
+    window.runtime_panel.server_port_edit.setText("30500")
+    window.runtime_panel.client_port_edit.setText("30501")
+    qtbot.mouseClick(window.operation_panel.primary_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: "Started service" in window.run_log_view.toPlainText())
+    window.service_tree.setCurrentItem(event_item)
+    qtbot.mouseClick(window.operation_panel.primary_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: "Subscribed eventgroup" in window.run_log_view.toPlainText())
+
+    window.export_trace_csv_action.trigger()
+    window.export_trace_json_action.trigger()
+    window.export_run_log_text_action.trigger()
+    window.export_run_log_json_action.trigger()
+
+    assert (tmp_path / "trace.csv").read_text(encoding="utf-8").startswith("timestamp,direction")
+    assert isinstance(json.loads((tmp_path / "trace.json").read_text(encoding="utf-8")), list)
+    assert "Started service" in (tmp_path / "run-log.txt").read_text(encoding="utf-8")
+    assert "Started service" in (tmp_path / "run-log.json").read_text(encoding="utf-8")

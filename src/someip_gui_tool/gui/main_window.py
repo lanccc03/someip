@@ -39,7 +39,12 @@ from someip_gui_tool.domain.models import (
 from someip_gui_tool.gui.operation_panel import OperationPanel
 from someip_gui_tool.gui.runtime_panel import RuntimePanel
 from someip_gui_tool.gui.theme import monospace_font
-from someip_gui_tool.tracing.exporters import export_run_log_text, export_trace_csv
+from someip_gui_tool.tracing.exporters import (
+    export_run_log_json,
+    export_run_log_text,
+    export_trace_csv,
+    export_trace_json,
+)
 from someip_gui_tool.tracing.trace_model import RunLogEntry
 
 
@@ -48,6 +53,8 @@ ITEM_PAYLOAD_ROLE = Qt.ItemDataRole.UserRole
 AsyncRunner = Callable[[Coroutine[Any, Any, None]], None]
 
 DefinitionDirectoryDialog = Callable[[QWidget], Path | None]
+
+SaveFileDialog = Callable[[QWidget, str, str, str], Path | None]
 
 
 def choose_definition_directory(parent: QWidget) -> Path | None:
@@ -60,6 +67,13 @@ def choose_definition_directory(parent: QWidget) -> Path | None:
     return Path(directory)
 
 
+def choose_save_file(parent: QWidget, title: str, suggested_name: str, file_filter: str) -> Path | None:
+    filename, _ = QFileDialog.getSaveFileName(parent, title, suggested_name, file_filter)
+    if not filename:
+        return None
+    return Path(filename)
+
+
 def schedule_async(awaitable: Coroutine[Any, Any, None]) -> None:
     asyncio.create_task(awaitable)
 
@@ -70,6 +84,7 @@ class MainWindow(QMainWindow):
         session: RuntimeSession | None = None,
         async_runner: AsyncRunner | None = None,
         definition_directory_dialog: DefinitionDirectoryDialog | None = None,
+        save_file_dialog: SaveFileDialog | None = None,
     ) -> None:
         super().__init__()
         self.setWindowTitle("SOME/IP Test Tool")
@@ -79,6 +94,7 @@ class MainWindow(QMainWindow):
         self._definition_directory_dialog = (
             definition_directory_dialog or choose_definition_directory
         )
+        self._save_file_dialog = save_file_dialog or choose_save_file
         self._running_service_ids: set[int] = set()
         self._running_configs: dict[int, RuntimeServiceConfig] = {}
         self._service_items: dict[int, QTreeWidgetItem] = {}
@@ -156,6 +172,77 @@ class MainWindow(QMainWindow):
             self.open_definition_directory
         )
         file_menu.addAction(self.open_definition_directory_action)
+
+        file_menu.addSeparator()
+        self.export_trace_csv_action = QAction("Export Message Trace CSV...", self)
+        self.export_trace_json_action = QAction("Export Message Trace JSON...", self)
+        self.export_run_log_text_action = QAction("Export Run Log TXT...", self)
+        self.export_run_log_json_action = QAction("Export Run Log JSON...", self)
+
+        self.export_trace_csv_action.triggered.connect(self.export_trace_csv)
+        self.export_trace_json_action.triggered.connect(self.export_trace_json)
+        self.export_run_log_text_action.triggered.connect(self.export_run_log_text)
+        self.export_run_log_json_action.triggered.connect(self.export_run_log_json)
+
+        file_menu.addAction(self.export_trace_csv_action)
+        file_menu.addAction(self.export_trace_json_action)
+        file_menu.addAction(self.export_run_log_text_action)
+        file_menu.addAction(self.export_run_log_json_action)
+
+    def export_trace_csv(self) -> None:
+        self._export_text(
+            "Export Message Trace CSV",
+            "message-trace.csv",
+            "CSV Files (*.csv)",
+            export_trace_csv(self.session.trace),
+        )
+
+    def export_trace_json(self) -> None:
+        self._export_text(
+            "Export Message Trace JSON",
+            "message-trace.json",
+            "JSON Files (*.json)",
+            export_trace_json(self.session.trace),
+        )
+
+    def export_run_log_text(self) -> None:
+        self._export_text(
+            "Export Run Log TXT",
+            "run-log.txt",
+            "Text Files (*.txt)",
+            export_run_log_text(self.session.run_log),
+        )
+
+    def export_run_log_json(self) -> None:
+        self._export_text(
+            "Export Run Log JSON",
+            "run-log.json",
+            "JSON Files (*.json)",
+            export_run_log_json(self.session.run_log),
+        )
+
+    def _export_text(
+        self,
+        title: str,
+        suggested_name: str,
+        file_filter: str,
+        content: str,
+    ) -> None:
+        path = self._save_file_dialog(self, title, suggested_name, file_filter)
+        if path is None:
+            return
+        path.write_text(content, encoding="utf-8")
+        message = f"Exported {title} to {path}"
+        self.session.run_log.append(
+            RunLogEntry(
+                timestamp=datetime.now(timezone.utc),
+                level="info",
+                source="GUI",
+                message=message,
+            )
+        )
+        self.statusBar().showMessage(message)
+        self._refresh_runtime_views()
 
     def open_definition_directory(self) -> None:
         if self._running_service_ids:

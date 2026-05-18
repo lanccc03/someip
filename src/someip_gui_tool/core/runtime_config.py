@@ -4,9 +4,18 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from ipaddress import ip_interface
 from types import MappingProxyType
+from typing import Protocol
 
 from someip_gui_tool.domain.enums import Role, TransportProtocol
 from someip_gui_tool.domain.models import ServiceDefinition
+
+
+class RuntimeEnvironment(Protocol):
+    def local_ip_addresses(self) -> set[str]:
+        ...
+
+    def is_port_available(self, ip_address: str, port: int) -> bool:
+        ...
 
 
 @dataclass(frozen=True)
@@ -56,6 +65,8 @@ def infer_runtime_config(service: ServiceDefinition, role: Role) -> RuntimeServi
 def validate_runtime_config(
     service: ServiceDefinition,
     config: RuntimeServiceConfig,
+    *,
+    environment: RuntimeEnvironment | None = None,
 ) -> list[RuntimeProblem]:
     problems: list[RuntimeProblem] = []
     if config.service_id != service.service_id:
@@ -183,6 +194,37 @@ def validate_runtime_config(
                 service_id=service.service_id,
             )
         )
+    has_error = any(problem.severity == "error" for problem in problems)
+    if environment is not None and not has_error:
+        local_host = config.local_ip.split("/", 1)[0]
+        local_ips = environment.local_ip_addresses()
+        if local_host not in local_ips:
+            problems.append(
+                RuntimeProblem(
+                    code="local_ip_not_on_adapter",
+                    severity="error",
+                    message=f"Local IP {local_host!r} was not found on local network adapters.",
+                    service_id=service.service_id,
+                )
+            )
+        if config.server_port is not None and not environment.is_port_available(local_host, config.server_port):
+            problems.append(
+                RuntimeProblem(
+                    code="server_port_occupied",
+                    severity="error",
+                    message=f"Server port {config.server_port} is already occupied on {local_host}.",
+                    service_id=service.service_id,
+                )
+            )
+        if config.client_port is not None and not environment.is_port_available(local_host, config.client_port):
+            problems.append(
+                RuntimeProblem(
+                    code="client_port_occupied",
+                    severity="error",
+                    message=f"Client port {config.client_port} is already occupied on {local_host}.",
+                    service_id=service.service_id,
+                )
+            )
     return problems
 
 

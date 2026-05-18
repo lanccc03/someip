@@ -629,6 +629,31 @@ async def test_runtime_session_client_start_records_find_timeout_warning(adc40_s
     )
 
 
+class FakeEnvironmentProbe:
+    def __init__(self, *, local_ips=None, occupied_ports=None):
+        self._local_ips = set(local_ips or [])
+        self._occupied_ports = set(occupied_ports or set())
+
+    def local_ip_addresses(self) -> set[str]:
+        return set(self._local_ips)
+
+    def is_port_available(self, ip_address: str, port: int) -> bool:
+        return (ip_address, port) not in self._occupied_ports
+
+
+@pytest.mark.asyncio
+async def test_runtime_session_uses_environment_validation(adc40_soc_dir):
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+    config = _valid_config(service, Role.CLIENT)
+    environment = FakeEnvironmentProbe(local_ips={"127.0.0.1"})
+    session = RuntimeSession(adapter=MockSomeIpAdapter(), environment=environment)
+
+    with pytest.raises(ValueError, match="local_ip_not_on_adapter"):
+        await session.start_service(service, config)
+
+    assert session.problems[-1].code == "local_ip_not_on_adapter"
+
+
 def _rx_trace_count(session: RuntimeSession, element_type: str) -> int:
     return sum(
         1

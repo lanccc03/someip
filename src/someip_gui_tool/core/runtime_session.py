@@ -28,9 +28,15 @@ from someip_gui_tool.tracing.trace_model import MessageTraceEntry, RunLogEntry
 
 
 class RuntimeSession:
-    def __init__(self, adapter: SomeIpAdapter, codec: PayloadCodec | None = None) -> None:
+    def __init__(
+        self,
+        adapter: SomeIpAdapter,
+        codec: PayloadCodec | None = None,
+        environment: Any | None = None,
+    ) -> None:
         self.adapter = adapter
         self.codec = codec or PayloadCodec()
+        self.environment = environment
         self.problems: list[RuntimeProblem] = []
         self.run_log: list[RunLogEntry] = []
         self.trace: list[MessageTraceEntry] = []
@@ -45,7 +51,7 @@ class RuntimeSession:
         service: ServiceDefinition,
         config: RuntimeServiceConfig,
     ) -> None:
-        problems = validate_runtime_config(service, config)
+        problems = validate_runtime_config(service, config, environment=self.environment)
         self.problems.extend(problems)
         for problem in problems:
             self._log(

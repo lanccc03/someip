@@ -48,3 +48,9 @@ def test_backend_settings_from_env() -> None:
         base_port=31000,
         start_daemon=True,
     )
+
+
+def test_create_session_enables_environment_validation() -> None:
+    session = create_session(BackendSettings(backend="mock"))
+
+    assert session.environment is not None

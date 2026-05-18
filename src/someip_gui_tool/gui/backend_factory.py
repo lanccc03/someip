@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from someip_gui_tool.adapters.mock import MockSomeIpAdapter
 from someip_gui_tool.adapters.someipy_adapter import SomeipyAdapter
+from someip_gui_tool.core.runtime_environment import RuntimeEnvironmentProbe
 from someip_gui_tool.core.runtime_session import RuntimeSession
 
 
@@ -28,15 +29,17 @@ class BackendSettings:
 
 def create_session(settings: BackendSettings | None = None) -> RuntimeSession:
     resolved = settings or BackendSettings.from_env()
+    environment = RuntimeEnvironmentProbe()
     if resolved.backend == "mock":
-        return RuntimeSession(MockSomeIpAdapter())
+        return RuntimeSession(MockSomeIpAdapter(), environment=environment)
     if resolved.backend == "someipy":
         return RuntimeSession(
             SomeipyAdapter(
                 local_ip=resolved.local_ip,
                 base_port=resolved.base_port,
                 start_daemon=resolved.start_daemon,
-            )
+            ),
+            environment=environment,
         )
     raise ValueError(f"Unsupported backend: {resolved.backend!r}")
 

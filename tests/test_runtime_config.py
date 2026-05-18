@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pytest
 
 from someip_gui_tool.core.runtime_config import (
@@ -188,3 +190,54 @@ def test_runtime_service_config_payload_defaults_are_immutable(adc40_soc_dir) ->
         config.payload_defaults["sequence"][1]["inner"] = "mutated"
     with pytest.raises(TypeError):
         config.payload_defaults["options"]["enabled"] = False
+
+
+class FakeEnvironmentProbe:
+    def __init__(self, *, local_ips=None, occupied_ports=None):
+        self._local_ips = set(local_ips or [])
+        self._occupied_ports = set(occupied_ports or set())
+
+    def local_ip_addresses(self) -> set[str]:
+        return set(self._local_ips)
+
+    def is_port_available(self, ip_address: str, port: int) -> bool:
+        return (ip_address, port) not in self._occupied_ports
+
+
+def test_validate_runtime_config_rejects_local_ip_not_on_adapter(adc40_soc_dir) -> None:
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+    config = replace(
+        infer_runtime_config(service, Role.CLIENT),
+        local_ip="172.16.3.15",
+        server_port=30500,
+        client_port=30501,
+    )
+
+    problems = validate_runtime_config(
+        service,
+        config,
+        environment=FakeEnvironmentProbe(local_ips={"127.0.0.1"}),
+    )
+
+    assert any(problem.code == "local_ip_not_on_adapter" for problem in problems)
+
+
+def test_validate_runtime_config_rejects_occupied_ports(adc40_soc_dir) -> None:
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+    config = replace(
+        infer_runtime_config(service, Role.CLIENT),
+        local_ip="127.0.0.1",
+        server_port=30500,
+        client_port=30501,
+    )
+
+    problems = validate_runtime_config(
+        service,
+        config,
+        environment=FakeEnvironmentProbe(
+            local_ips={"127.0.0.1"},
+            occupied_ports={("127.0.0.1", 30501)},
+        ),
+    )
+
+    assert any(problem.code == "client_port_occupied" for problem in problems)

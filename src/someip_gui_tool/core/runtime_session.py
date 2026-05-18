@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from typing import Any
 
@@ -37,6 +38,7 @@ class RuntimeSession:
         self._active_service_ids: set[int] = set()
         self._registered_trace_keys: set[tuple[str, int, int]] = set()
         self._trace_generations: dict[int, int] = {}
+        self._cycle_tasks: dict[tuple[int, int], asyncio.Task[None]] = {}
 
     async def start_service(
         self,
@@ -115,6 +117,8 @@ class RuntimeSession:
         )
 
     async def stop_service(self, service: ServiceDefinition) -> None:
+        for event in service.events:
+            await self.stop_cycle_event(service, event)
         try:
             await self.adapter.stop_service(service)
         except Exception as exc:
@@ -238,6 +242,28 @@ class RuntimeSession:
             element_id=event.event_id_hex,
         )
 
+    async def unsubscribe_event(self, service: ServiceDefinition, event: EventDefinition) -> None:
+        if event.eventgroup_id is None:
+            raise ValueError(f"Event {event.name!r} has no eventgroup id")
+        try:
+            await self.adapter.unsubscribe_eventgroup(service, event.eventgroup_id)
+        except Exception as exc:
+            self._record_adapter_exception(
+                "unsubscribe_event_adapter_exception",
+                service,
+                f"Adapter failed to unsubscribe event {event.name}",
+                exc,
+                element_id=event.event_id_hex,
+            )
+            raise
+        self._log(
+            "info",
+            "Core",
+            f"Unsubscribed eventgroup 0x{event.eventgroup_id:04X} for {event.name}",
+            service_id=service.service_id_hex,
+            element_id=event.event_id_hex,
+        )
+
     async def publish_event(
         self,
         service: ServiceDefinition,
@@ -290,6 +316,65 @@ class RuntimeSession:
             "info",
             "Core",
             f"Published event {event.name} payload={payload.hex()}",
+            service_id=service.service_id_hex,
+            element_id=event.event_id_hex,
+        )
+
+    async def start_cycle_event(
+        self,
+        service: ServiceDefinition,
+        event: EventDefinition,
+        values: dict[str, Any],
+        *,
+        cycle_time_s: float | None = None,
+    ) -> None:
+        interval = cycle_time_s if cycle_time_s is not None else event.cycle_time_s
+        if interval is None or interval <= 0:
+            raise ValueError(f"Event {event.name!r} has no positive cycle time")
+        key = (service.service_id, event.event_id)
+        if key in self._cycle_tasks:
+            return
+
+        async def run_cycle() -> None:
+            try:
+                while True:
+                    await self.publish_event(service, event, values)
+                    await asyncio.sleep(interval)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                self._cycle_tasks.pop(key, None)
+                self._log(
+                    "error",
+                    "Core",
+                    f"Cycle event {event.name} stopped due to error",
+                    service_id=service.service_id_hex,
+                    element_id=event.event_id_hex,
+                )
+
+        self._cycle_tasks[key] = asyncio.create_task(run_cycle())
+        self._log(
+            "info",
+            "Core",
+            f"Started cycle event {event.name}",
+            service_id=service.service_id_hex,
+            element_id=event.event_id_hex,
+        )
+
+    async def stop_cycle_event(self, service: ServiceDefinition, event: EventDefinition) -> None:
+        key = (service.service_id, event.event_id)
+        task = self._cycle_tasks.pop(key, None)
+        if task is None:
+            return
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        self._log(
+            "info",
+            "Core",
+            f"Stopped cycle event {event.name}",
             service_id=service.service_id_hex,
             element_id=event.event_id_hex,
         )

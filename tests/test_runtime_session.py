@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import replace
 
 import pytest
@@ -67,6 +68,9 @@ class FailingAdapter(MockSomeIpAdapter):
 
     async def subscribe_eventgroup(self, service, eventgroup_id):
         raise RuntimeError("adapter subscribe failed")
+
+    async def unsubscribe_eventgroup(self, service, eventgroup_id):
+        raise RuntimeError("adapter unsubscribe failed")
 
     async def publish_event(self, service, event, payload):
         raise RuntimeError("adapter publish failed")
@@ -164,6 +168,21 @@ async def test_runtime_session_records_subscribe_adapter_exception(adc40_soc_dir
     assert "adapter subscribe failed" in session.problems[-1].message
     assert session.run_log[-1].level == "error"
     assert session.run_log[-1].error_detail == "adapter subscribe failed"
+
+
+@pytest.mark.asyncio
+async def test_runtime_session_records_unsubscribe_adapter_exception(adc40_soc_dir):
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+    session = RuntimeSession(adapter=FailingAdapter())
+
+    with pytest.raises(RuntimeError, match="adapter unsubscribe failed"):
+        await session.unsubscribe_event(service, service.events[0])
+
+    assert session.problems[-1].code == "unsubscribe_event_adapter_exception"
+    assert session.problems[-1].severity == "error"
+    assert "adapter unsubscribe failed" in session.problems[-1].message
+    assert session.run_log[-1].level == "error"
+    assert session.run_log[-1].error_detail == "adapter unsubscribe failed"
 
 
 @pytest.mark.asyncio
@@ -636,3 +655,62 @@ async def test_runtime_session_adapter_config_uses_service_ttl_defaults(
     assert adapter.start_config is not None
     assert adapter.start_config.offer_ttl_s == service.deployment.offer_ttl_s
     assert adapter.start_config.find_ttl_s == service.deployment.find_ttl_s
+
+
+@pytest.mark.asyncio
+async def test_runtime_session_unsubscribes_event(adc40_soc_dir):
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+    event = service.events[0]
+    adapter = MockSomeIpAdapter()
+    session = RuntimeSession(adapter=adapter)
+
+    await session.start_service(service, _valid_config(service, Role.CLIENT))
+    await session.subscribe_event(service, event)
+    await session.unsubscribe_event(service, event)
+
+    assert [call.name for call in adapter.calls][-2:] == [
+        "subscribe_eventgroup",
+        "unsubscribe_eventgroup",
+    ]
+    assert session.run_log[-1].message == (
+        f"Unsubscribed eventgroup 0x{event.eventgroup_id:04X} for {event.name}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_runtime_session_cycle_event_publishes_until_stopped(adc40_soc_dir):
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+    event = service.events[0]
+    adapter = MockSomeIpAdapter()
+    session = RuntimeSession(adapter=adapter)
+    values = {"VehicleInfo": {"VehicleSpeed": 12.5, "Odometer": 99.25}}
+
+    await session.start_service(service, _valid_config(service, Role.SERVER))
+    await session.start_cycle_event(service, event, values, cycle_time_s=0.01)
+    await asyncio.sleep(0.035)
+    await session.stop_cycle_event(service, event)
+    publish_count_after_stop = sum(call.name == "publish_event" for call in adapter.calls)
+    await asyncio.sleep(0.025)
+
+    assert publish_count_after_stop >= 2
+    assert sum(call.name == "publish_event" for call in adapter.calls) == publish_count_after_stop
+    assert any("Started cycle event VehicleInfo" in entry.message for entry in session.run_log)
+    assert session.run_log[-1].message == "Stopped cycle event VehicleInfo"
+
+
+@pytest.mark.asyncio
+async def test_runtime_session_stop_service_cancels_cycle_events(adc40_soc_dir):
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+    event = service.events[0]
+    adapter = MockSomeIpAdapter()
+    session = RuntimeSession(adapter=adapter)
+    values = {"VehicleInfo": {"VehicleSpeed": 12.5, "Odometer": 99.25}}
+
+    await session.start_service(service, _valid_config(service, Role.SERVER))
+    await session.start_cycle_event(service, event, values, cycle_time_s=0.01)
+    await asyncio.sleep(0.025)
+    await session.stop_service(service)
+    publish_count_after_stop = sum(call.name == "publish_event" for call in adapter.calls)
+    await asyncio.sleep(0.025)
+
+    assert sum(call.name == "publish_event" for call in adapter.calls) == publish_count_after_stop

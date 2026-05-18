@@ -16,8 +16,10 @@ def main() -> int:
     apply_theme(app)
     loop = QEventLoop(app)
     asyncio.set_event_loop(loop)
-    window = MainWindow(session=create_session())
+    session = create_session()
+    window = MainWindow(session=session)
     window.show()
     with loop:
         loop.run_forever()
+        loop.run_until_complete(session.adapter.shutdown())
     return 0

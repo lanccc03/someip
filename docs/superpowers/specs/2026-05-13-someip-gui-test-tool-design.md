@@ -627,3 +627,14 @@ If a critical spike item fails, evaluate `vsomeip_py` or an internal SOME/IP sta
 - `someipy` is treated as the first backend, not a permanent hard dependency.
 - Current `someipy` method support is capability-gated: FF method paths may report `limited`, and RR method support is not accepted until proven by a fixture and adapter implementation.
 - Field Setter is not part of the accepted first-release backend capability until a supported JSON fixture and adapter path exist.
+
+## 11. Implementation Status Notes
+
+MVP-1 accepts the current `someipy` backend capability gates:
+
+- FF method paths may report `limited`.
+- RR methods remain gated.
+- Field setter remains gated.
+- Event subscribe/unsubscribe, event publish/cycle publish, field getter, and field notifier are the supported GUI runtime paths.
+
+See `docs/mvp1-known-limits.md` for the current release boundary.

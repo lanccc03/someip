@@ -7,7 +7,8 @@ from someip_gui_tool.gui import app as app_module
 
 def _drive_immediate_coroutine(awaitable) -> None:
     try:
-        awaitable.send(None)
+        while True:
+            awaitable.send(None)
     except StopIteration:
         return
 

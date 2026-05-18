@@ -832,3 +832,46 @@ def test_main_window_starts_and_stops_cycle_event_as_server(qtbot, adc40_soc_dir
     qtbot.waitUntil(lambda: "Stopped cycle event VehicleInfo" in window.run_log_view.toPlainText())
 
     _cycle_loop.close()
+
+
+def test_operation_panel_marks_ff_methods_limited(qtbot, adc40_soc_dir):
+    window = MainWindow(async_runner=_run_immediate)
+    qtbot.addWidget(window)
+    window.load_service_directory(adc40_soc_dir)
+    method_item = None
+    for service_index in range(window.service_tree.topLevelItemCount()):
+        service_item = window.service_tree.topLevelItem(service_index)
+        for child_index in range(service_item.childCount()):
+            child = service_item.child(child_index)
+            if "SecondStartCtrl" in child.text(0):
+                method_item = child
+                break
+        if method_item is not None:
+            break
+    assert method_item is not None
+
+    window.service_tree.setCurrentItem(method_item)
+
+    assert "fire-and-forget" in window.operation_panel.status_label.text().lower()
+    assert "limited" in window.operation_panel.status_label.text().lower()
+
+
+def test_operation_panel_marks_field_setter_gated(qtbot, adc40_soc_dir):
+    window = MainWindow(async_runner=_run_immediate)
+    qtbot.addWidget(window)
+    window.load_service_directory(adc40_soc_dir)
+    field_item = None
+    for service_index in range(window.service_tree.topLevelItemCount()):
+        service_item = window.service_tree.topLevelItem(service_index)
+        for child_index in range(service_item.childCount()):
+            child = service_item.child(child_index)
+            if "VertHeiRmdSts" in child.text(0):
+                field_item = child
+                break
+        if field_item is not None:
+            break
+    assert field_item is not None
+
+    window.service_tree.setCurrentItem(field_item)
+
+    assert "setter unavailable" in window.operation_panel.status_label.text().lower()

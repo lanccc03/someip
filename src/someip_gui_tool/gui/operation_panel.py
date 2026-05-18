@@ -19,6 +19,9 @@ class OperationPanel(QGroupBox):
         self.setObjectName("operation_panel")
         self.title_label = QLabel("Select a method, event, or field")
         self.title_label.setObjectName("operation_title")
+        self.status_label = QLabel("")
+        self.status_label.setObjectName("operation_status")
+        self.status_label.setWordWrap(True)
         self.primary_button = QPushButton("Start")
         self.primary_button.setProperty("primary", True)
         self.secondary_button = QPushButton("Stop")
@@ -29,6 +32,7 @@ class OperationPanel(QGroupBox):
 
         layout = QVBoxLayout(self)
         layout.addWidget(self.title_label)
+        layout.addWidget(self.status_label)
         layout.addWidget(self.payload_text)
         layout.addWidget(self.primary_button)
         layout.addWidget(self.secondary_button)
@@ -36,6 +40,7 @@ class OperationPanel(QGroupBox):
 
     def set_service_actions(self, *, running: bool = False) -> None:
         self.title_label.setText("Select a method, event, or field")
+        self.status_label.setText("")
         self.primary_button.setText("Start")
         self.primary_button.setEnabled(not running)
         self.secondary_button.setText("Stop")
@@ -52,6 +57,7 @@ class OperationPanel(QGroupBox):
 
     def clear_selection(self) -> None:
         self.title_label.setText("Select a method, event, or field")
+        self.status_label.setText("")
         self.primary_button.setText("Start")
         self.primary_button.setEnabled(False)
         self.secondary_button.setText("Stop")
@@ -62,6 +68,18 @@ class OperationPanel(QGroupBox):
 
     def show_method(self, method: MethodDefinition, role: Role) -> None:
         self.title_label.setText(f"Method {method.name} ({method.method_id_hex})")
+        if method.rr_ff == "FF":
+            self.status_label.setText(
+                "Backend status: fire-and-forget method execution is limited; "
+                "adapter reports availability but cannot prove an end-to-end FF response."
+            )
+        elif method.rr_ff == "RR":
+            self.status_label.setText(
+                "Backend status: RR method execution is gated until a proven fixture "
+                "and adapter request/response path are available."
+            )
+        else:
+            self.status_label.setText("")
         if role is Role.CLIENT:
             self.primary_button.setText("Call")
             self.primary_button.setEnabled(True)
@@ -76,6 +94,12 @@ class OperationPanel(QGroupBox):
 
     def show_event(self, event: EventDefinition, role: Role) -> None:
         self.title_label.setText(f"Event {event.name} ({event.event_id_hex})")
+        if event.cycle_time_s is None:
+            self.status_label.setText("Backend status: trigger event supports manual publish.")
+        else:
+            self.status_label.setText(
+                f"Backend status: cycle event supports manual publish and cycle publish every {event.cycle_time_s:g}s."
+            )
         if role is Role.CLIENT:
             self.primary_button.setText("Subscribe")
             self.primary_button.setEnabled(True)
@@ -94,6 +118,16 @@ class OperationPanel(QGroupBox):
 
     def show_field(self, field: FieldDefinition, role: Role) -> None:
         self.title_label.setText(f"Field {field.name}")
+        messages = []
+        if field.getter is not None:
+            messages.append("getter supported")
+        if field.notifier is not None:
+            messages.append("notifier supported")
+        if field.setter is None:
+            messages.append("setter unavailable")
+        else:
+            messages.append("setter gated until a supported backend path exists")
+        self.status_label.setText("Backend status: " + ", ".join(messages) + ".")
         if role is Role.CLIENT:
             self.primary_button.setText("Get")
             self.primary_button.setEnabled(field.getter is not None)

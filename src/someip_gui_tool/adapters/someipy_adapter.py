@@ -46,6 +46,7 @@ class _SomeipyServiceRuntime:
     endpoint_port: int
     client_port: int
     active_eventgroups: set[int]
+    start_config: AdapterStartConfig | None
 
 
 class SomeipyAdapter(SomeIpAdapter):
@@ -351,7 +352,10 @@ class SomeipyAdapter(SomeIpAdapter):
     ) -> _SomeipyServiceRuntime:
         runtime = self._service_runtimes.get(service.service_id)
         if runtime is not None:
-            return runtime
+            if config is None or runtime.start_config == config:
+                return runtime
+            await _maybe_await(runtime.server.stop_offer())
+            self._service_runtimes.pop(service.service_id, None)
 
         daemon = await self._ensure_daemon()
         api = self._api
@@ -400,6 +404,7 @@ class SomeipyAdapter(SomeIpAdapter):
             endpoint_port=endpoint_port,
             client_port=client_port,
             active_eventgroups=set(),
+            start_config=config,
         )
         self._service_runtimes[service.service_id] = runtime
         return runtime

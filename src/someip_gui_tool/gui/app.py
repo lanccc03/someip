@@ -21,5 +21,10 @@ def main() -> int:
     window.show()
     with loop:
         loop.run_forever()
-        loop.run_until_complete(session.adapter.shutdown())
+        try:
+            loop.run_until_complete(session.adapter.shutdown())
+        except Exception:
+            import traceback
+
+            traceback.print_exc()
     return 0

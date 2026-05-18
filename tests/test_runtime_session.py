@@ -51,6 +51,16 @@ class ErrorResultAdapter(MockSomeIpAdapter):
         return AdapterMethodResult(status="error", detail="field set adapter rejected request")
 
 
+class CaptureStartConfigAdapter(MockSomeIpAdapter):
+    def __init__(self) -> None:
+        super().__init__()
+        self.start_config = None
+
+    async def start_service(self, service, config=None):
+        self.start_config = config
+        await super().start_service(service, config)
+
+
 class FailingAdapter(MockSomeIpAdapter):
     async def start_service(self, service, config=None):
         raise RuntimeError("adapter start failed")
@@ -606,3 +616,23 @@ def _rx_trace_count(session: RuntimeSession, element_type: str) -> int:
         for entry in session.trace
         if entry.direction == TraceDirection.RX and entry.element_type == element_type
     )
+
+
+@pytest.mark.asyncio
+async def test_runtime_session_adapter_config_uses_service_ttl_defaults(
+    adc40_soc_dir,
+):
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+    adapter = CaptureStartConfigAdapter()
+    session = RuntimeSession(adapter=adapter)
+    config = replace(
+        _valid_config(service, Role.CLIENT),
+        offer_ttl_s=None,
+        find_ttl_s=None,
+    )
+
+    await session.start_service(service, config)
+
+    assert adapter.start_config is not None
+    assert adapter.start_config.offer_ttl_s == service.deployment.offer_ttl_s
+    assert adapter.start_config.find_ttl_s == service.deployment.find_ttl_s

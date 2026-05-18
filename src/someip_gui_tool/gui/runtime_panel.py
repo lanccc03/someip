@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from PySide6.QtWidgets import QComboBox, QFormLayout, QGroupBox, QLineEdit
 
-from someip_gui_tool.core.runtime_config import RuntimeServiceConfig
+from someip_gui_tool.core.runtime_config import RuntimeServiceConfig, infer_runtime_config
 from someip_gui_tool.domain.enums import Role
 from someip_gui_tool.domain.models import ServiceDefinition
 
@@ -50,10 +52,10 @@ class RuntimePanel(QGroupBox):
         self.multicast_ip_edit.setText(config.multicast_ip)
 
     def config_for_service(self, service: ServiceDefinition) -> RuntimeServiceConfig:
-        return RuntimeServiceConfig(
-            service_id=service.service_id,
-            instance_id=service.deployment.instance_id,
-            role=Role(self.role_combo.currentText()),
+        role = Role(self.role_combo.currentText())
+        base_config = infer_runtime_config(service, role)
+        return replace(
+            base_config,
             local_ip=self.local_ip_edit.text().strip(),
             remote_ip=self.remote_ip_edit.text().strip(),
             server_port=_optional_port(self.server_port_edit.text(), "Server port"),

@@ -12,15 +12,22 @@ from someip_gui_tool.parsing.service_json import load_service_definition
 from tests.fakes_someipy_runtime import FakeSomeipyApi
 
 
-def _adapter_start_config(role: Role = Role.CLIENT) -> AdapterStartConfig:
+def _adapter_start_config(
+    role: Role = Role.CLIENT,
+    *,
+    local_ip: str = "127.0.0.1/24",
+    multicast_ip: str = "239.192.255.251",
+    offer_ttl_s: float = 3.0,
+    find_ttl_s: float = 3.0,
+) -> AdapterStartConfig:
     return AdapterStartConfig(
         role=role,
-        local_ip="127.0.0.1/24",
+        local_ip=local_ip,
         server_port=32000,
         client_port=32001,
-        multicast_ip="239.192.255.251",
-        offer_ttl_s=3.0,
-        find_ttl_s=3.0,
+        multicast_ip=multicast_ip,
+        offer_ttl_s=offer_ttl_s,
+        find_ttl_s=find_ttl_s,
     )
 
 
@@ -490,3 +497,71 @@ async def test_someipy_adapter_repeated_configured_start_reuses_matching_runtime
     assert len(api.clients) == 1
     assert api.servers[0].endpoint_port == 32000
     assert api.clients[0].endpoint_port == 32001
+
+
+@pytest.mark.asyncio
+async def test_someipy_adapter_uses_configured_offer_and_find_ttls(
+    adc40_soc_dir,
+) -> None:
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+    event = service.events[0]
+    assert event.eventgroup_id is not None
+    api = FakeSomeipyApi()
+    adapter = SomeipyAdapter(api=api, local_ip="127.0.0.1", base_port=31000)
+
+    await adapter.start_service(
+        service,
+        _adapter_start_config(Role.CLIENT, offer_ttl_s=7.0, find_ttl_s=11.0),
+    )
+    await adapter.subscribe_eventgroup(service, event.eventgroup_id)
+
+    assert api.servers[0].ttl == 7
+    assert api.clients[0].subscribed_eventgroups == [(event.eventgroup_id, 11)]
+
+
+@pytest.mark.asyncio
+async def test_someipy_adapter_owned_daemon_uses_configured_multicast_and_interface(
+    adc40_soc_dir,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    api = FakeSomeipyApi()
+    started = []
+
+    class FakeProcess:
+        def stop(self) -> None:
+            return None
+
+    def fake_start(config, work_dir):
+        started.append((config, work_dir))
+        return FakeProcess()
+
+    monkeypatch.setattr(
+        "someip_gui_tool.adapters.someipy_adapter.SomeipydProcess.start",
+        fake_start,
+    )
+    adapter = SomeipyAdapter(
+        api=api,
+        local_ip="127.0.0.1",
+        base_port=31000,
+        start_daemon=True,
+        daemon_work_dir=tmp_path,
+    )
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+
+    await adapter.start_service(
+        service,
+        _adapter_start_config(
+            Role.SERVER,
+            local_ip="192.168.0.10/24",
+            multicast_ip="239.1.2.3",
+        ),
+    )
+    await adapter.shutdown()
+
+    assert len(started) == 1
+    assert started[0][0].interface == "192.168.0.10"
+    assert started[0][0].tcp_host == "192.168.0.10"
+    assert started[0][0].sd_address == "239.1.2.3"
+    assert started[0][0].tcp_port == 31000
+    assert started[0][1] == tmp_path

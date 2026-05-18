@@ -57,7 +57,7 @@ class RuntimeSession:
         if errors:
             problem_codes = ", ".join(problem.code for problem in errors)
             raise ValueError(f"Runtime config invalid: {problem_codes}")
-        adapter_config = _adapter_start_config(config)
+        adapter_config = _adapter_start_config(service, config)
         try:
             await self.adapter.start_service(service, adapter_config)
             if config.role is Role.SERVER:
@@ -928,7 +928,10 @@ class RuntimeSession:
         return self._trace_generations.get(service.service_id, 0)
 
 
-def _adapter_start_config(config: RuntimeServiceConfig) -> AdapterStartConfig:
+def _adapter_start_config(
+    service: ServiceDefinition,
+    config: RuntimeServiceConfig,
+) -> AdapterStartConfig:
     if config.server_port is None or config.client_port is None:
         raise ValueError("Runtime config must have server_port and client_port after validation.")
     return AdapterStartConfig(
@@ -937,8 +940,16 @@ def _adapter_start_config(config: RuntimeServiceConfig) -> AdapterStartConfig:
         server_port=config.server_port,
         client_port=config.client_port,
         multicast_ip=config.multicast_ip,
-        offer_ttl_s=config.offer_ttl_s or 0.0,
-        find_ttl_s=config.find_ttl_s or 0.0,
+        offer_ttl_s=(
+            config.offer_ttl_s
+            if config.offer_ttl_s is not None
+            else service.deployment.offer_ttl_s
+        ),
+        find_ttl_s=(
+            config.find_ttl_s
+            if config.find_ttl_s is not None
+            else service.deployment.find_ttl_s
+        ),
     )
 
 

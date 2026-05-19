@@ -7,7 +7,9 @@ from types import MappingProxyType
 from someip_gui_tool.adapters.base import (
     AdapterEvent,
     AdapterMethodResult,
+    AdapterServiceAvailability,
     AdapterStartConfig,
+    AdapterSubscriptionResult,
     EventHandler,
     SomeIpAdapter,
 )
@@ -61,6 +63,10 @@ class MockSomeIpAdapter(SomeIpAdapter):
     async def find_service(self, service: ServiceDefinition) -> bool:
         self.calls.append(AdapterCall("find_service", {"service_id": service.service_id_hex}))
         return True
+
+    async def check_service_available(self, service: ServiceDefinition) -> AdapterServiceAvailability:
+        self.calls.append(AdapterCall("check_service_available", {"service_id": service.service_id_hex}))
+        return AdapterServiceAvailability(available=True, detail="mock service is available")
 
     async def call_method(
         self,
@@ -117,7 +123,11 @@ class MockSomeIpAdapter(SomeIpAdapter):
         key = (service.service_id, field.notifier.element_id)
         self._event_handlers.setdefault(key, []).append(handler)
 
-    async def subscribe_eventgroup(self, service: ServiceDefinition, eventgroup_id: int) -> None:
+    async def subscribe_eventgroup(
+        self,
+        service: ServiceDefinition,
+        eventgroup_id: int,
+    ) -> AdapterSubscriptionResult:
         self.calls.append(
             AdapterCall(
                 "subscribe_eventgroup",
@@ -125,8 +135,17 @@ class MockSomeIpAdapter(SomeIpAdapter):
             )
         )
         self._subscribed_eventgroups.add((service.service_id, eventgroup_id))
+        return AdapterSubscriptionResult(
+            status="requested",
+            detail="mock subscription request accepted",
+            service_available=True,
+        )
 
-    async def unsubscribe_eventgroup(self, service: ServiceDefinition, eventgroup_id: int) -> None:
+    async def unsubscribe_eventgroup(
+        self,
+        service: ServiceDefinition,
+        eventgroup_id: int,
+    ) -> AdapterSubscriptionResult:
         self.calls.append(
             AdapterCall(
                 "unsubscribe_eventgroup",
@@ -134,6 +153,11 @@ class MockSomeIpAdapter(SomeIpAdapter):
             )
         )
         self._subscribed_eventgroups.discard((service.service_id, eventgroup_id))
+        return AdapterSubscriptionResult(
+            status="cancel-requested",
+            detail="mock unsubscribe request accepted",
+            service_available=True,
+        )
 
     async def publish_event(
         self,

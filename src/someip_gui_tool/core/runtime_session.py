@@ -45,6 +45,8 @@ class RuntimeSession:
         self._registered_trace_keys: set[tuple[str, int, int]] = set()
         self._trace_generations: dict[int, int] = {}
         self._cycle_tasks: dict[tuple[int, int], asyncio.Task[None]] = {}
+        self._service_availability: dict[int, bool] = {}
+        self._subscription_requests: set[tuple[int, int]] = set()
 
     async def start_service(
         self,
@@ -78,6 +80,7 @@ class RuntimeSession:
                 )
             else:
                 found = await self.adapter.find_service(service)
+                self._service_availability[service.service_id] = found
                 if found:
                     self._log(
                         "info",
@@ -137,6 +140,10 @@ class RuntimeSession:
             raise
         self._active_service_ids.discard(service.service_id)
         self._configs.pop(service.service_id, None)
+        self._service_availability.pop(service.service_id, None)
+        self._subscription_requests = {
+            key for key in self._subscription_requests if key[0] != service.service_id
+        }
         self._registered_trace_keys = {
             key for key in self._registered_trace_keys if key[1] != service.service_id
         }
@@ -229,7 +236,11 @@ class RuntimeSession:
     async def subscribe_event(self, service: ServiceDefinition, event: EventDefinition) -> None:
         if event.eventgroup_id is None:
             raise ValueError(f"Event {event.name!r} has no eventgroup id")
-        found = await self.adapter.find_service(service)
+        availability = await self.adapter.check_service_available(service)
+        found = availability.available
+        if not found:
+            found = await self.adapter.find_service(service)
+        self._service_availability[service.service_id] = found
         if not found:
             message = (
                 f"Subscription for eventgroup 0x{event.eventgroup_id:04X} "
@@ -263,10 +274,14 @@ class RuntimeSession:
                 element_id=event.event_id_hex,
             )
             raise
+        self._subscription_requests.add((service.service_id, event.eventgroup_id))
+        message = f"Requested subscription for eventgroup 0x{event.eventgroup_id:04X} for {event.name}"
+        if not found:
+            message += " (pending service availability)"
         self._log(
             "info",
             "Core",
-            f"Requested subscription for eventgroup 0x{event.eventgroup_id:04X} for {event.name}",
+            message,
             service_id=service.service_id_hex,
             element_id=event.event_id_hex,
         )
@@ -274,6 +289,28 @@ class RuntimeSession:
     async def unsubscribe_event(self, service: ServiceDefinition, event: EventDefinition) -> None:
         if event.eventgroup_id is None:
             raise ValueError(f"Event {event.name!r} has no eventgroup id")
+        subscription_key = (service.service_id, event.eventgroup_id)
+        if subscription_key not in self._subscription_requests:
+            warning = (
+                f"Unsubscribe requested for eventgroup 0x{event.eventgroup_id:04X} "
+                f"for {event.name}, but no local subscription request is active."
+            )
+            self.problems.append(
+                RuntimeProblem(
+                    code="unsubscribe_without_local_subscription",
+                    severity="warning",
+                    message=warning,
+                    service_id=service.service_id,
+                )
+            )
+            self._log(
+                "warning",
+                "Core",
+                warning,
+                service_id=service.service_id_hex,
+                element_id=event.event_id_hex,
+                error_detail="unsubscribe_without_local_subscription",
+            )
         try:
             await self.adapter.unsubscribe_eventgroup(service, event.eventgroup_id)
         except Exception as exc:
@@ -285,6 +322,7 @@ class RuntimeSession:
                 element_id=event.event_id_hex,
             )
             raise
+        self._subscription_requests.discard(subscription_key)
         self._log(
             "info",
             "Core",

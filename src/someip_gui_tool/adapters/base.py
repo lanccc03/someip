@@ -39,6 +39,25 @@ class AdapterEvent:
     payload: bytes
 
 
+@dataclass(frozen=True)
+class AdapterServiceAvailability:
+    available: bool
+    detail: str
+
+
+@dataclass(frozen=True)
+class AdapterSubscriptionResult:
+    status: str
+    detail: str
+    service_available: bool | None = None
+
+
+SUBSCRIPTION_REQUESTED = "requested"
+SUBSCRIPTION_PENDING = "pending"
+SUBSCRIPTION_CANCEL_REQUESTED = "cancel-requested"
+SUBSCRIPTION_NOT_REQUESTED = "not-requested"
+
+
 EventHandler = Callable[[AdapterEvent], None]
 
 
@@ -61,6 +80,10 @@ class SomeIpAdapter(ABC):
 
     @abstractmethod
     async def find_service(self, service: ServiceDefinition) -> bool:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def check_service_available(self, service: ServiceDefinition) -> AdapterServiceAvailability:
         raise NotImplementedError
 
     @abstractmethod
@@ -91,11 +114,19 @@ class SomeIpAdapter(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def subscribe_eventgroup(self, service: ServiceDefinition, eventgroup_id: int) -> None:
+    async def subscribe_eventgroup(
+        self,
+        service: ServiceDefinition,
+        eventgroup_id: int,
+    ) -> AdapterSubscriptionResult:
         raise NotImplementedError
 
     @abstractmethod
-    async def unsubscribe_eventgroup(self, service: ServiceDefinition, eventgroup_id: int) -> None:
+    async def unsubscribe_eventgroup(
+        self,
+        service: ServiceDefinition,
+        eventgroup_id: int,
+    ) -> AdapterSubscriptionResult:
         raise NotImplementedError
 
     @abstractmethod

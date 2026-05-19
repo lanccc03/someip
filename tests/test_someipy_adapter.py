@@ -156,6 +156,25 @@ async def test_someipy_adapter_find_service_sends_sd_find_before_polling(
     assert payload[36:40] == service.deployment.minor_version.to_bytes(4, "big")
 
 
+@pytest.mark.asyncio
+async def test_someipy_adapter_check_service_available_does_not_send_sd_find(adc40_soc_dir) -> None:
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+    api = FakeSomeipyApi(availability_sequences={service.service_id: [True]})
+    sent_packets: list[tuple[bytes, tuple[str, int]]] = []
+    adapter = SomeipyAdapter(
+        api=api,
+        local_ip="127.0.0.1",
+        base_port=31000,
+        sd_socket_factory=lambda: _FakeSdSocket(sent_packets),
+    )
+
+    result = await adapter.check_service_available(service)
+
+    assert result.available is True
+    assert sent_packets == []
+    assert api.availability_calls[service.service_id] == 1
+
+
 def test_someipy_adapter_is_someip_adapter_implementation() -> None:
     adapter = SomeipyAdapter(api=FakeSomeipyApi(), local_ip="127.0.0.1", base_port=30500)
 
@@ -285,6 +304,28 @@ async def test_someipy_adapter_subscribes_eventgroup_with_service_ttl(adc40_soc_
         (event.eventgroup_id, int(service.deployment.find_ttl_s))
     ]
     assert adapter._service_runtimes[service.service_id].active_eventgroups == {event.eventgroup_id}
+
+
+@pytest.mark.asyncio
+async def test_someipy_adapter_subscribe_result_is_pending_when_service_unavailable(adc40_soc_dir) -> None:
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+    event = service.events[0]
+    assert event.eventgroup_id is not None
+    api = FakeSomeipyApi(availability_sequences={service.service_id: [False]})
+    adapter = SomeipyAdapter(
+        api=api,
+        local_ip="127.0.0.1",
+        base_port=31000,
+        sd_socket_factory=_FakeSdSocket,
+    )
+
+    result = await adapter.subscribe_eventgroup(service, event.eventgroup_id)
+
+    assert result.status == "pending"
+    assert result.service_available is False
+    assert api.clients[0].subscribed_eventgroups == [
+        (event.eventgroup_id, int(service.deployment.find_ttl_s))
+    ]
 
 
 @pytest.mark.asyncio

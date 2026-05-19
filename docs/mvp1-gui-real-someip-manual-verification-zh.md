@@ -418,7 +418,7 @@ C:\code\someip\ADC40_SOC
 预期结果：
 
 - 运行日志包含 `Found service`（启动成功时）。
-- 运行日志包含 `Subscribed eventgroup`。
+- 运行日志包含 `Requested subscription for eventgroup`。
 - 消息追踪包含 RX 事件行：
   - `element_type` = `Event`
   - `element_name` = `VehicleInfo`
@@ -442,7 +442,7 @@ C:\code\someip\ADC40_SOC
 
 预期结果：
 
-- 运行日志包含 `Unsubscribed eventgroup`。
+- 运行日志包含 `Requested unsubscribe for eventgroup`。
 - 取消订阅后无新的 RX 追踪行出现。
 
 结果：

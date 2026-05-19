@@ -7,6 +7,31 @@ from someip_gui_tool.parsing.service_json import load_service_definition
 
 
 @pytest.mark.asyncio
+async def test_mock_adapter_reports_service_availability(adc40_soc_dir):
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+    adapter = MockSomeIpAdapter()
+
+    result = await adapter.check_service_available(service)
+
+    assert result.available is True
+    assert result.detail == "mock service is available"
+
+
+@pytest.mark.asyncio
+async def test_mock_adapter_subscription_results_are_request_states(adc40_soc_dir):
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+    event = service.events[0]
+    adapter = MockSomeIpAdapter()
+
+    subscribe_result = await adapter.subscribe_eventgroup(service, event.eventgroup_id or 0)
+    unsubscribe_result = await adapter.unsubscribe_eventgroup(service, event.eventgroup_id or 0)
+
+    assert subscribe_result.status == "requested"
+    assert subscribe_result.service_available is True
+    assert unsubscribe_result.status == "cancel-requested"
+
+
+@pytest.mark.asyncio
 async def test_mock_adapter_records_runtime_operations(adc40_soc_dir):
     event_service = load_service_definition(adc40_soc_dir / "0x080E.json")
     field_service = load_service_definition(adc40_soc_dir / "0x080C.json")

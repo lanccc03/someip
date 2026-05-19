@@ -12,8 +12,14 @@ from typing import Any
 from someip_gui_tool.adapters.base import (
     AdapterEvent,
     AdapterMethodResult,
+    AdapterServiceAvailability,
     AdapterStartConfig,
+    AdapterSubscriptionResult,
     EventHandler,
+    SUBSCRIPTION_CANCEL_REQUESTED,
+    SUBSCRIPTION_NOT_REQUESTED,
+    SUBSCRIPTION_PENDING,
+    SUBSCRIPTION_REQUESTED,
     SomeIpAdapter,
 )
 from someip_gui_tool.adapters.capabilities import SOMEIPY_FF_LIMITATION
@@ -102,12 +108,21 @@ class SomeipyAdapter(SomeIpAdapter):
     async def find_service(self, service: ServiceDefinition) -> bool:
         runtime = await self._runtime_for_service(service)
         self._send_find_service_request(service, runtime)
-        for attempt in range(FIND_AVAILABILITY_ATTEMPTS):
-            if bool(await _maybe_await(runtime.client.is_available())):
-                return True
-            if attempt < FIND_AVAILABILITY_ATTEMPTS - 1:
-                await asyncio.sleep(FIND_AVAILABILITY_DELAY_S)
-        return False
+        return await self._poll_service_available(
+            service,
+            attempts=FIND_AVAILABILITY_ATTEMPTS,
+        )
+
+    async def check_service_available(self, service: ServiceDefinition) -> AdapterServiceAvailability:
+        available = await self._poll_service_available(service, attempts=1)
+        return AdapterServiceAvailability(
+            available=available,
+            detail=(
+                "someipy service is available in daemon cache"
+                if available
+                else "someipy service is not available in daemon cache"
+            ),
+        )
 
     async def call_method(
         self,
@@ -140,7 +155,12 @@ class SomeipyAdapter(SomeIpAdapter):
         key = (service.service_id, field.notifier.element_id)
         self._event_handlers.setdefault(key, []).append(handler)
 
-    async def subscribe_eventgroup(self, service: ServiceDefinition, eventgroup_id: int) -> None:
+    async def subscribe_eventgroup(
+        self,
+        service: ServiceDefinition,
+        eventgroup_id: int,
+    ) -> AdapterSubscriptionResult:
+        availability = await self.check_service_available(service)
         runtime = await self._runtime_for_service(service)
         eventgroup = self._eventgroup_for(service, eventgroup_id)
         await _maybe_await(
@@ -150,12 +170,40 @@ class SomeipyAdapter(SomeIpAdapter):
             )
         )
         runtime.active_eventgroups.add(eventgroup_id)
+        return AdapterSubscriptionResult(
+            status=SUBSCRIPTION_REQUESTED if availability.available else SUBSCRIPTION_PENDING,
+            detail=(
+                "someipy subscription request submitted; service available"
+                if availability.available
+                else "someipy subscription request queued pending service availability"
+            ),
+            service_available=availability.available,
+        )
 
-    async def unsubscribe_eventgroup(self, service: ServiceDefinition, eventgroup_id: int) -> None:
+    async def unsubscribe_eventgroup(
+        self,
+        service: ServiceDefinition,
+        eventgroup_id: int,
+    ) -> AdapterSubscriptionResult:
+        availability = await self.check_service_available(service)
         runtime = await self._runtime_for_service(service)
         eventgroup = self._eventgroup_for(service, eventgroup_id)
+        was_requested = eventgroup_id in runtime.active_eventgroups
         await _maybe_await(runtime.client.unsubscribe_eventgroup(eventgroup))
         runtime.active_eventgroups.discard(eventgroup_id)
+        return AdapterSubscriptionResult(
+            status=(
+                SUBSCRIPTION_CANCEL_REQUESTED
+                if was_requested
+                else SUBSCRIPTION_NOT_REQUESTED
+            ),
+            detail=(
+                "someipy unsubscribe request submitted"
+                if was_requested
+                else "someipy unsubscribe requested without a local subscription request"
+            ),
+            service_available=availability.available,
+        )
 
     async def publish_event(
         self,
@@ -264,6 +312,20 @@ class SomeipyAdapter(SomeIpAdapter):
                 detail=f"someipy method payload must be bytes, got {type(payload).__name__}",
             )
         return AdapterMethodResult(status="success", detail=success_detail, payload=payload)
+
+    async def _poll_service_available(
+        self,
+        service: ServiceDefinition,
+        *,
+        attempts: int,
+    ) -> bool:
+        runtime = await self._runtime_for_service(service)
+        for attempt in range(attempts):
+            if bool(await _maybe_await(runtime.client.is_available())):
+                return True
+            if attempt < attempts - 1:
+                await asyncio.sleep(FIND_AVAILABILITY_DELAY_S)
+        return False
 
     def _stop_owned_daemon_process(self) -> None:
         if self._owned_daemon_process is not None:

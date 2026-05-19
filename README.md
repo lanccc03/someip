@@ -163,8 +163,11 @@ Client role：
 1. 先 Start 服务。
 2. 选择同一 Event。
 3. 点击 `Subscribe`。
-4. 收到事件后 Message Trace 会出现 RX Event。
-5. 不需要接收时点击 `Unsubscribe`。
+4. Run Log 应出现 `Requested subscription for eventgroup ...`。
+5. 收到事件后 Message Trace 会出现 RX Event。
+6. 不需要接收时点击 `Unsubscribe`，Run Log 应出现 `Requested unsubscribe for eventgroup ...`。
+
+注意：Run Log 中的 subscribe/unsubscribe 只表示 GUI 已向 `someipyd` 发出请求，不等同于协议抓包通过。Wireshark 中的 SubscribeEventgroup 只会在 `someipyd` 已发现 server OfferService 后出现；如果服务尚未可用，请求可能先保持 pending。StopSubscribeEventgroup 只会在 `someipyd` 已知存在 active subscription 时出现。
 
 ### 5.4 Field Getter/Notifier
 
@@ -284,4 +287,3 @@ Get-NetTCPConnection -LocalPort 30500 -ErrorAction SilentlyContinue
 - `docs/mvp1-gui-real-someip-manual-verification.md`
 
 其中 AUTOSAR 符合性文档要求以 Wireshark 抓包为最终判据，GUI Run Log 和 Message Trace 只作为辅助证据。
-

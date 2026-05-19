@@ -262,10 +262,10 @@ GUI 步骤：
 - Server 返回 SubscribeEventgroupAck Type `0x07`，字段匹配原 Subscribe；如返回 Nack，则 TTL 应为 `0` 且需记录失败原因。
 
 GUI 辅助证据：
-- Run Log 包含 `Subscribed eventgroup 0x0001 ...`。
+- Run Log 包含 `Requested subscription for eventgroup 0x0001 ...`，仅表示 GUI 已发出请求，不作为协议通过判据。
 
 失败判据：
-- GUI 显示已订阅但无 SubscribeEventgroup 报文。
+- GUI 已提交订阅请求但无 SubscribeEventgroup 报文。
 - Subscribe eventgroup ID 错误。
 - ACK/NACK 与 Subscribe 字段不匹配。
 
@@ -281,15 +281,15 @@ GUI 步骤：
 3. Server 再 Publish 一次该事件。
 
 抓包通过判据：
-- 出现 StopSubscribeEventgroup，字段与原 Subscribe 对应，TTL 为 `0x000000`。
+- active subscription 已建立时，出现 StopSubscribeEventgroup，字段与原 Subscribe 对应，TTL 为 `0x000000`。
 - 取消订阅后，Client 不应再接收该 eventgroup 的事件通知；若仍收到，需要确认是否是发送前已排队或另有订阅者。
 
 GUI 辅助证据：
-- Run Log 包含 `Unsubscribed eventgroup ...`。
+- Run Log 包含 `Requested unsubscribe for eventgroup ...`，仅表示 GUI 已发出请求，不作为协议通过判据。
 - Message Trace 中 unsubscribe 后无新的 RX Event。
 
 失败判据：
-- Unsubscribe 未产生 TTL 0 的 StopSubscribe。
+- active subscription 已建立时，Unsubscribe 未产生 TTL 0 的 StopSubscribe。
 - Client 仍稳定接收后续事件。
 
 ### EVT-UDP-01 UDP Event Notification

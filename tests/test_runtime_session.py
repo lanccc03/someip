@@ -3,8 +3,8 @@ from dataclasses import replace
 
 import pytest
 
-from someip_gui_tool.adapters.base import AdapterMethodResult
-from someip_gui_tool.adapters.mock import MockSomeIpAdapter
+from someip_gui_tool.adapters.base import AdapterMethodResult, AdapterServiceAvailability
+from someip_gui_tool.adapters.mock import AdapterCall, MockSomeIpAdapter
 from someip_gui_tool.core.runtime_config import RuntimeServiceConfig, infer_runtime_config
 from someip_gui_tool.core.runtime_session import RuntimeSession
 from someip_gui_tool.domain.enums import Role, TraceDirection
@@ -68,6 +68,36 @@ class UnavailableFindAdapter(MockSomeIpAdapter):
         return False
 
 
+class AvailabilityAdapter(MockSomeIpAdapter):
+    def __init__(
+        self,
+        availability_sequence: list[bool],
+        *,
+        find_available: bool = True,
+    ) -> None:
+        super().__init__()
+        self.availability_sequence = list(availability_sequence)
+        self.find_available = find_available
+
+    async def check_service_available(self, service):
+        available = (
+            self.availability_sequence.pop(0)
+            if self.availability_sequence
+            else False
+        )
+        self.calls.append(
+            AdapterCall(
+                "check_service_available",
+                {"service_id": service.service_id_hex, "available": available},
+            )
+        )
+        return AdapterServiceAvailability(available=available, detail="test availability")
+
+    async def find_service(self, service):
+        await super().find_service(service)
+        return self.find_available
+
+
 class FailingAdapter(MockSomeIpAdapter):
     async def start_service(self, service, config=None):
         raise RuntimeError("adapter start failed")
@@ -111,7 +141,7 @@ async def test_runtime_session_subscribes_and_publishes_event(adc40_soc_dir):
     assert [call.name for call in adapter.calls] == [
         "start_service",
         "offer_service",
-        "find_service",
+        "check_service_available",
         "subscribe_eventgroup",
         "publish_event",
     ]
@@ -710,38 +740,58 @@ async def test_runtime_session_unsubscribes_event(adc40_soc_dir):
 
 
 @pytest.mark.asyncio
-async def test_runtime_session_subscribe_refreshes_discovery_before_request(adc40_soc_dir):
+async def test_runtime_session_subscribe_does_not_find_when_service_already_available(adc40_soc_dir):
     service = load_service_definition(adc40_soc_dir / "0x080E.json")
     event = service.events[0]
-    adapter = MockSomeIpAdapter()
+    adapter = AvailabilityAdapter([True])
     session = RuntimeSession(adapter=adapter)
 
     await session.start_service(service, _valid_config(service, Role.CLIENT))
     await session.subscribe_event(service, event)
 
     assert [call.name for call in adapter.calls][-2:] == [
-        "find_service",
+        "check_service_available",
         "subscribe_eventgroup",
     ]
+    assert [call.name for call in adapter.calls].count("find_service") == 1
     assert session.run_log[-1].message == (
         f"Requested subscription for eventgroup 0x{event.eventgroup_id:04X} for {event.name}"
     )
 
 
 @pytest.mark.asyncio
-async def test_runtime_session_subscribe_warns_when_service_unavailable(adc40_soc_dir):
+async def test_runtime_session_subscribe_requests_discovery_when_service_unavailable(adc40_soc_dir):
     service = load_service_definition(adc40_soc_dir / "0x080E.json")
     event = service.events[0]
-    adapter = UnavailableFindAdapter()
+    adapter = AvailabilityAdapter([False], find_available=False)
     session = RuntimeSession(adapter=adapter)
 
     await session.start_service(service, _valid_config(service, Role.CLIENT))
     await session.subscribe_event(service, event)
 
+    assert [call.name for call in adapter.calls].count("find_service") == 2
     assert session.problems[-1].code == "subscription_pending_service_unavailable"
     assert "pending" in session.run_log[-2].message.lower()
     assert session.run_log[-1].message == (
-        f"Requested subscription for eventgroup 0x{event.eventgroup_id:04X} for {event.name}"
+        f"Requested subscription for eventgroup 0x{event.eventgroup_id:04X} for {event.name} "
+        "(pending service availability)"
+    )
+
+
+@pytest.mark.asyncio
+async def test_runtime_session_unsubscribe_warns_without_local_request(adc40_soc_dir):
+    service = load_service_definition(adc40_soc_dir / "0x080E.json")
+    event = service.events[0]
+    adapter = MockSomeIpAdapter()
+    session = RuntimeSession(adapter=adapter)
+
+    await session.start_service(service, _valid_config(service, Role.CLIENT))
+    await session.unsubscribe_event(service, event)
+
+    assert session.problems[-1].code == "unsubscribe_without_local_subscription"
+    assert session.run_log[-2].error_detail == "unsubscribe_without_local_subscription"
+    assert session.run_log[-1].message == (
+        f"Requested unsubscribe for eventgroup 0x{event.eventgroup_id:04X} for {event.name}"
     )
 
 
